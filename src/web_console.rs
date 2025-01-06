@@ -206,6 +206,37 @@ async fn metrics() -> impl Responder {
     HttpResponse::Ok().body(response)
 }
 
+/// Initializes the application state (see [`AppState`])
+/// and starts an HTTP server at `127.0.0.1:8080`.
+///
+/// It sets up and runs an [Actix Web Server](https://actix.rs/) with multiple
+/// [endpoints](#endpoints) for managing brokers.
+///
+/// # Returns
+/// `std::io::Result<()>` indicating the success or failure of the server execution.
+///
+/// # Example
+/// ```
+/// #[tokio::main]
+/// async fn main() -> std::io::Result<()> {
+///     // Start the web console server
+///     web_console::run_server().await
+/// }
+/// ```
+///
+/// # Endpoints
+///
+/// The server provides the following REST API endpoints:
+///
+/// | Function              | Type  | Endpoint      | Description                                                                               |
+/// |-----------------------|-------|---------------|-------------------------------------------------------------------------------------------|
+/// | [`start_broker`]      | POST  | `/start`      | Starts a new broker with the given ID, partitions, replication factor, and storage path.  |
+/// | [`stop_broker`]       | POST  | `/stop`       | Stops the broker with the given ID.                                                       |
+/// | [`send_message`]      | POST  | `/send`       | Sends a message to the broker with the given ID.                                          |
+/// | [`consume_messages`]  | POST  | `/consume`    | Consumes a message from the broker with the given ID.                                     |
+/// | [`broker_status`]     | POST  | `/status`     | Checks the status of the broker with the given ID.                                        |
+/// | [`metrics`]           | GET   | `/metrics`    | Exposes the Prometheus metrics for the application.                                       |
+///
 pub async fn run_server() -> std::io::Result<()> {
     let state = AppState {
         brokers: Arc::new(Mutex::new(HashMap::new())),
