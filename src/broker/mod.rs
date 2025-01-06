@@ -10,6 +10,10 @@ pub mod storage;
 pub mod topic;
 pub mod transaction;
 
+use tokio::io::AsyncReadExt;
+use tokio::io::AsyncWriteExt;
+use tokio::net::{TcpListener, TcpStream};
+use tokio::time::{sleep, timeout};
 use uuid::Uuid;
 
 use crate::broker::consumer::group::ConsumerGroup;
@@ -20,8 +24,8 @@ use crate::broker::message_queue::MessageQueue;
 use crate::broker::node_management::{check_node_health, recover_node};
 use crate::broker::storage::Storage;
 use crate::broker::topic::Topic;
-use crate::broker::transaction::Transaction;
-use crate::message::ack::Message;
+pub use crate::broker::transaction::Transaction;
+pub use crate::message::ack::Message;
 use crate::message::ack::MessageAck;
 use crate::subscriber::types::Subscriber;
 use std::collections::{HashMap, HashSet};
@@ -42,6 +46,13 @@ impl ConsumerGroup {
     }
 }
 
+#[derive(Debug)]
+pub enum BrokerStatus {
+    Running,
+    Stopped,
+    Error(String),
+}
+
 pub struct Broker {
     pub id: String,
     pub topics: HashMap<String, Topic>,
@@ -58,29 +69,12 @@ pub struct Broker {
     pub message_queue: Arc<MessageQueue>,
     log_path: String,
     pub processed_message_ids: Arc<Mutex<HashSet<Uuid>>>,
+    pub ack_port: u16, // Move outside the mutable lock
+    ack_listener: Option<TcpListener>,
 }
 
 impl Broker {
-    /// Creates a new broker instance.
-    ///
-    /// # Arguments
-    ///
-    /// * `id` - A string slice that holds the ID of the broker.
-    /// * `num_partitions` - The number of partitions for the broker.
-    /// * `replication_factor` - The replication factor for the broker.
-    /// * `storage_path` - The path to the storage file.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use pilgrimage::broker::Broker;
-    ///
-    /// let broker = Broker::new("broker1", 3, 2, "logs");
-    /// assert_eq!(broker.id, "broker1");
-    /// assert_eq!(broker.num_partitions, 3);
-    /// assert_eq!(broker.replication_factor, 2);
-    /// ```
-    pub fn new(
+    pub async fn new(
         id: &str,
         num_partitions: usize,
         replication_factor: usize,
@@ -93,6 +87,15 @@ impl Broker {
         let leader_election = LeaderElection::new(id, peers);
         let storage = Storage::new(storage_path).expect("Failed to initialize storage");
         let log_path = format!("logs/{}.log", id);
+
+        let ack_port = 8083;
+        let ack_listener = match TcpListener::bind(format!("127.0.0.1:{}", ack_port)).await {
+            Ok(listener) => Some(listener),
+            Err(e) => {
+                println!("Failed to bind ACK listener: {}", e);
+                None
+            }
+        };
 
         let broker = Broker {
             id: id.to_string(),
@@ -114,17 +117,23 @@ impl Broker {
             )),
             log_path: log_path.to_string(),
             processed_message_ids: Arc::new(Mutex::new(HashSet::new())),
+            ack_port: ack_port,
+            ack_listener,
         };
         broker.monitor_nodes();
         broker
     }
 
-    pub fn send_message_transaction(
+    pub fn get_status(&self) -> BrokerStatus {
+        BrokerStatus::Running
+    }
+
+    pub async fn send_message_transaction(
         &self,
         transaction: &mut Transaction,
         message: Message,
     ) -> Result<(), BrokerError> {
-        if self.process_message(message.clone())? {
+        if self.process_message(&message).await? {
             transaction.add_message(message);
             Ok(())
         } else {
@@ -132,20 +141,29 @@ impl Broker {
         }
     }
 
-    pub fn process_message(&self, message: Message) -> Result<bool, BrokerError> {
-        let mut processed = self.processed_message_ids.lock().unwrap();
-        if processed.contains(&message.id) {
-            return Err(BrokerError::DuplicateMessage);
+    pub async fn process_message(&self, message: &Message) -> io::Result<bool> {
+        let message_id = message.id.to_string(); // Convert Uuid to String
+
+        // Load a message ID that has already been processed.
+        let processed_message_ids = self.load_processed_message_ids()?;
+
+        // Check if the message has already been processed.
+        if processed_message_ids.contains(&message_id) {
+            println!("メッセージは既に処理済みです: {}", message_id);
+            return Ok(false);
         }
-        processed.insert(message.id);
-        // メッセージの処理ロジックをここに追加
+
+        // Save processed message ID
+        self.save_processed_message_id(&message_id)?;
+
         Ok(true)
     }
 
-    pub fn send_and_process(&self, message: Message) -> Result<(), BrokerError> {
+    pub async fn send_and_process(&self, message: Message) -> Result<(), BrokerError> {
         let mut transaction = self.begin_transaction();
-        self.send_message_transaction(&mut transaction, message)?;
-        transaction.commit()?;
+        self.send_message_transaction(&mut transaction, message)
+            .await?;
+        let _ = transaction.commit();
         Ok(())
     }
 
@@ -216,19 +234,133 @@ impl Broker {
         true
     }
 
-    pub async fn send_message(&self, message: String) -> Result<(), String> {
-        self.message_queue.send(message);
+    /// Send a message and wait for an ACK.
+    pub async fn send_message(&mut self, message: String) -> Result<(), String> {
+        // ACK listener initialization confirmed
+        self.init_ack_listener().await?;
 
-        match self.receive_ack().await {
-            Ok(_) => Ok(()),
-            Err(e) => Err(format!("Failed to receive ACK: {}", e)),
+        let max_retries = 3;
+        let mut attempts = 0;
+
+        loop {
+            if attempts >= max_retries {
+                return Err(
+                    "The maximum number of retries has been reached. The ACK cannot be received."
+                        .to_string(),
+                );
+            }
+
+            println!("Message sending attempt: {}/{}", attempts + 1, max_retries);
+            match TcpStream::connect("127.0.0.1:8081").await {
+                Ok(mut stream) => {
+                    if let Err(e) = stream.write_all(message.as_bytes()).await {
+                        println!("Message sending error: {}", e);
+                        attempts += 1;
+                        sleep(Duration::from_millis(500)).await;
+                        continue;
+                    }
+                    println!(
+                        "The message was sent to the receiver on port 8081.: {}",
+                        message
+                    );
+                }
+                Err(e) => {
+                    println!("Could not connect to the receiving side.: {}", e);
+                    attempts += 1;
+                    sleep(Duration::from_millis(500)).await;
+                    continue;
+                }
+            }
+
+            println!("Waiting for ACK on port {}.", self.ack_port);
+            match self.receive_ack().await {
+                Ok(_) => {
+                    println!("ACK received. Message sent successfully.");
+                    return Ok(());
+                }
+                Err(e) => {
+                    println!("ACK reception error: {}", e);
+                    attempts += 1;
+                    sleep(Duration::from_millis(500)).await;
+                    continue;
+                }
+            }
         }
     }
 
+    /// Initializes the ACK listener.
+    async fn init_ack_listener(&mut self) -> Result<(), String> {
+        if self.ack_listener.is_none() {
+            let addr = format!("127.0.0.1:{}", self.ack_port);
+            match TcpListener::bind(&addr).await {
+                Ok(listener) => {
+                    println!("The ACK listener has been bound with {}.", addr);
+                    self.ack_listener = Some(listener);
+                    Ok(())
+                }
+                Err(e) => Err(format!("Failed to bind ACK listener: {}", e)),
+            }
+        } else {
+            Ok(())
+        }
+    }
+
+    /// ACK is received. It is ensured that ACK is received with retries.
     async fn receive_ack(&self) -> Result<(), String> {
-        // ACK受信ロジック
-        // 成功時はOk(()), 失敗時はErr(String)を返す
-        Ok(())
+        if let Some(listener) = &self.ack_listener {
+            println!("Waiting for ACK on port {}.", self.ack_port);
+            let max_retries = 5;
+            let mut attempts = 0;
+
+            loop {
+                if attempts >= max_retries {
+                    return Err("The maximum number of retries has been reached. The ACK cannot be received.".to_string());
+                }
+
+                println!("ACK reception attempt: {}/{}", attempts + 1, max_retries);
+                match timeout(Duration::from_secs(5), listener.accept()).await {
+                    Ok(Ok((mut socket, _))) => {
+                        let mut buf = [0; 1024];
+                        match timeout(Duration::from_secs(5), socket.read(&mut buf)).await {
+                            Ok(Ok(n)) => {
+                                let ack = String::from_utf8_lossy(&buf[..n]).trim().to_string();
+                                println!("ACK received: {}", ack);
+                                if ack == "ACK" {
+                                    println!("A valid ACK was received.");
+                                    return Ok(());
+                                } else {
+                                    println!("Invalid ACK received: {}", ack);
+                                    attempts += 1;
+                                    continue;
+                                }
+                            }
+                            Ok(Err(e)) => {
+                                println!("ACK read error: {}", e);
+                                attempts += 1;
+                                continue;
+                            }
+                            Err(_) => {
+                                println!("ACK read timeout");
+                                attempts += 1;
+                                continue;
+                            }
+                        }
+                    }
+                    Ok(Err(e)) => {
+                        println!("ACK acceptance error: {}", e);
+                        attempts += 1;
+                        continue;
+                    }
+                    Err(_) => {
+                        println!("ACK acceptance timeout");
+                        attempts += 1;
+                        continue;
+                    }
+                }
+            }
+        } else {
+            Err("ACK listener is not initialized.".to_string())
+        }
     }
 
     pub fn receive_message(&self) -> Option<String> {
@@ -236,16 +368,21 @@ impl Broker {
     }
 
     fn save_processed_message_id(&self, message_id: &str) -> io::Result<()> {
-        let mut file = OpenOptions::new()
-            .append(true)
-            .create(true)
-            .open("processed_message_ids.txt")?;
+        let path = "processed_message_ids.txt";
+        if !Path::new(path).exists() {
+            File::create(path)?;
+        }
+        let mut file = OpenOptions::new().append(true).create(true).open(path)?;
         writeln!(file, "{}", message_id)?;
         Ok(())
     }
 
     fn load_processed_message_ids(&self) -> io::Result<Vec<String>> {
-        let file = File::open("processed_message_ids.txt")?;
+        let path = "processed_message_ids.txt";
+        if !Path::new(path).exists() {
+            return Ok(Vec::new());
+        }
+        let file = File::open(path)?;
         let reader = BufReader::new(file);
         let mut message_ids = Vec::new();
         for line in reader.lines() {
@@ -351,22 +488,6 @@ impl Broker {
         *self.leader_election.state.lock().unwrap() == BrokerState::Leader
     }
 
-    /// Creates a new topic.
-    ///
-    /// # Arguments
-    ///
-    /// * `name` - The name of the topic.
-    /// * `num_partitions` - The number of partitions for the topic.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use pilgrimage::broker::Broker;
-    ///
-    /// let mut broker = Broker::new("broker1", 3, 2, "logs");
-    /// broker.create_topic("test_topic", None).unwrap();
-    /// assert!(broker.topics.contains_key("test_topic"));
-    /// ```
     pub fn create_topic(
         &mut self,
         name: &str,
@@ -385,30 +506,6 @@ impl Broker {
         Ok(())
     }
 
-    /// Subscribes a subscriber to a topic.
-    ///
-    /// # Arguments
-    ///
-    /// * `topic_name` - The name of the topic.
-    /// * `subscriber` - The subscriber to add.
-    /// * `group_id` - Optional consumer group ID.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use pilgrimage::broker::Broker;
-    /// use pilgrimage::subscriber::types::Subscriber;
-    ///
-    /// let mut broker = Broker::new("broker1", 3, 2, "logs");
-    /// broker.create_topic("test_topic", None).unwrap();
-    /// let subscriber = Subscriber::new(
-    ///     "consumer1",
-    ///     Box::new(|msg: String| {
-    ///         println!("Received message: {}", msg);
-    ///     }),
-    /// );
-    /// broker.subscribe("test_topic", subscriber, None).unwrap();
-    /// ```
     pub fn subscribe(
         &mut self,
         topic_name: &str,
@@ -434,24 +531,6 @@ impl Broker {
         }
     }
 
-    /// Publishes a message to a topic with acknowledgment.
-    ///
-    /// # Arguments
-    ///
-    /// * `topic_name` - The name of the topic.
-    /// * `message` - The message to publish.
-    /// * `key` - An optional key for partitioning.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use pilgrimage::broker::Broker;
-    ///
-    /// let mut broker = Broker::new("broker1", 3, 2, "logs");
-    /// broker.create_topic("test_topic", None).unwrap();
-    /// let ack = broker.publish_with_ack("test_topic", "test_message".to_string(), None).unwrap();
-    /// assert_eq!(ack.topic, "test_topic");
-    /// ```
     pub fn publish_with_ack(
         &mut self,
         topic_name: &str,

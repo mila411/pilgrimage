@@ -17,6 +17,7 @@ test_db_path
 .DS_Store
 .AppleDouble
 .LSOverride
+data
 
 # Icon must end with two \r
 Icon

@@ -1,12 +1,10 @@
-use uuid::Uuid;
-
-use crate::broker::error::BrokerError;
 use crate::message::ack::Message;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufRead, BufReader, BufWriter, Write};
 use std::path::Path;
 use std::time::SystemTime;
 
+use uuid::Uuid;
 #[derive(Debug)]
 pub struct Storage {
     file: BufWriter<File>,

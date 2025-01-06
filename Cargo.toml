@@ -23,32 +23,35 @@ name = "web"
 path = "src/main.rs"
 
 [dependencies]
-clap = "3.2.0"
+actix-web = "4"
+aes = "0.7"
+aes-gcm = "0.10.3"
+block-modes = "0.8"
+clap = { version = "4.0", features = ["derive"] }
 ctrlc = "3.4.5"
+flate2 = "1.0.35"
+jsonwebtoken = "8.1.1"
+lazy_static = "1.4"
+lapin = "1.6"
+log = "0.4"
+prometheus= "0.13"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-log = "0.4"
-simplelog = "0.9"
-aes-gcm = "0.10.3"
-rand = "0.8.5"
-jsonwebtoken = "8.1.1"
-tempfile = "3.2"
-flate2 = "1.0.35"
-actix-web = "4"
-tokio = { version = "1", features = ["full"] }
-prometheus = "0.13"
-lazy_static = "1.4"
-uuid = { version = "1", features = ["v4"] }
 thiserror = "1.0"
-lapin = "1.6"
+rand = "0.8.5"
+simplelog = "0.9"
+tempfile = "3.2"
+tokio = { version = "1", features = ["full"] }
+uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
-criterion = "0.3"
-tempfile = "3.2"
-assert_cmd = "2"
-predicates = "3"
 actix-rt = "2.5"
 actix-test = "0.1.5"
+assert_cmd = "2"
+criterion = "0.3"
+predicates = "3"
+tokio = { version = "1", features = ["full"] }
+tempfile = "3.2"
 
 [[bench]]
 name = "benchmark"

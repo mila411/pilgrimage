@@ -59,7 +59,7 @@ impl ConsumerGroup {
     pub fn add_member(&self, consumer_id: &str, subscriber: Subscriber) {
         let mut members = self.members.lock().unwrap();
         members.insert(consumer_id.to_string(), GroupMember { subscriber });
-        drop(members); // メンバー追加後にロックを解放
+        drop(members); // Unlock after adding members
         self.rebalance_partitions();
     }
 
@@ -67,7 +67,7 @@ impl ConsumerGroup {
     fn rebalance_partitions(&self) {
         let members = self.members.lock().unwrap();
         let member_ids: Vec<_> = members.keys().cloned().collect();
-        drop(members); // メンバーリスト取得後にロックを解放
+        drop(members); // Unlock after obtaining the member list
 
         let mut assignments = self.assignments.lock().unwrap();
         assignments.clear();

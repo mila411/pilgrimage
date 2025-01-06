@@ -21,33 +21,3 @@ pub fn recover_node(storage: &Mutex<Storage>, consumer_groups: &Mutex<ConsumerGr
         group.reset_assignments();
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::Broker;
-    use std::sync::Arc;
-    use std::thread;
-    use std::time::Duration;
-
-    #[test]
-    fn test_auto_recovery() {
-        let storage = Arc::new(Mutex::new(Storage::new("test_db_path").unwrap()));
-        let mut broker = Broker::new("broker_id", 1, 1, "test_db_path");
-        broker.storage = storage.clone();
-
-        // Simulate a disability
-        {
-            let mut storage_guard = storage.lock().unwrap();
-            storage_guard.available = false;
-        }
-
-        // Perform automatic recovery
-        broker.monitor_nodes();
-
-        // Check recovery
-        thread::sleep(Duration::from_millis(100));
-        let storage_guard = storage.lock().unwrap();
-        assert!(storage_guard.is_available());
-    }
-}

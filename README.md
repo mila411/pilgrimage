@@ -73,113 +73,193 @@ When using Pilgramage as a Crate, client authentication is implemented, but at p
 ### Basic usage
 
 ```rust
-use pilgrimage::broker::{Broker, Node};
-use std::sync::{Arc, Mutex};
+use pilgrimage::broker::{Broker, Message};
+use std::fs;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
-fn main() {
-    // Broker Creation
-    let broker = Broker::new("broker1", 3, 2, "storage_path");
+#[tokio::main]
+async fn main() {
+    // Create the necessary directories and files
+    let log_dir = "data/broker1/logs";
+    let log_file = "data/broker1/logs/messages.log";
+    let processed_message_ids_file = "data/broker1/logs/processed_message_ids.txt";
 
-    // Adding a node
-    let node = Node {
-        data: Arc::new(Mutex::new(Vec::new())),
-    };
-    broker.add_node("node1".to_string(), node);
+    fs::create_dir_all(log_dir).expect("Failed to create directory");
+    fs::File::create(log_file).expect("Failed to create log file.");
+    fs::File::create(processed_message_ids_file)
+        .expect("Failed to create processed_message_ids.txt");
+
+    // Checking the existence of a file
+    if !std::path::Path::new(log_file).exists() {
+        eprintln!("The log file does not exist.: {}", log_file);
+        return;
+    }
+    if !std::path::Path::new(processed_message_ids_file).exists() {
+        eprintln!(
+            "processed_message_ids.txt does not exist: {}",
+            processed_message_ids_file
+        );
+        return;
+    }
+
+    // Broker initialization
+    let broker = Arc::new(Mutex::new(Broker::new("broker1", 3, 2, log_file).await));
 
     // Send a message
-    broker.send_message("Hello, world!".to_string());
+    let broker_producer = Arc::clone(&broker);
+    let handle = tokio::spawn(async move {
+        let broker_lock = broker_producer.lock().await;
 
-    // Message received
-    if let Some(message) = broker.receive_message() {
-        println!("Received: {}", message);
-    }
+        // Start transaction
+        let mut transaction = broker_lock.begin_transaction();
+
+        // Message generation
+        let message_content = "Hello, Pilgrimage!".to_string();
+        let message = Message::new(message_content.clone());
+
+        // Send a message (send without waiting for ACK)
+        match broker_lock
+            .send_message_transaction(&mut transaction, message)
+            .await
+        {
+            Ok(_) => {
+                if let Err(e) = transaction.commit() {
+                    eprintln!("Transaction commit failed.: {:?}", e);
+                } else {
+                    println!("Message sent.: {}", message_content);
+                }
+            }
+            Err(e) => eprintln!("Failed to send message: {:?}", e),
+        }
+    });
+
+    // Waiting for the transmission task to finish
+    handle.await.unwrap();
 }
+
 ```
 
-### Multi-threaded message processing
+### Exactly-once send messsage
 
 ```rust
 use pilgrimage::broker::Broker;
 use std::sync::Arc;
-use std::thread;
+use tokio::io::AsyncReadExt;
+use tokio::io::AsyncWriteExt;
+use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::Mutex;
+use tokio::time::{Duration, sleep, timeout};
 
-fn main() {
-    let broker = Arc::new(Broker::new("broker1", 3, 2, "storage_path"));
+#[tokio::main]
+async fn main() {
+    let broker = Arc::new(Mutex::new(
+        Broker::new("broker1", 3, 2, "storage_path").await,
+    ));
 
-    let broker_sender = Arc::clone(&broker);
-    let sender_handle = thread::spawn(move || {
-        for i in 0..10 {
-            let message = format!("Message {}", i);
-            broker_sender.send_message(message);
-        }
-    });
+    let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+    let receiver_handle = tokio::spawn(async move {
+        let listener = TcpListener::bind("127.0.0.1:8081").await.unwrap();
+        println!("The message recipient is waiting on port 8081.");
+        ready_tx.send(()).unwrap();
 
-    let broker_receiver = Arc::clone(&broker);
-    let receiver_handle = thread::spawn(move || {
         for _ in 0..10 {
-            if let Some(message) = broker_receiver.receive_message() {
-                println!("Received: {:?}", message);
+            match timeout(Duration::from_secs(10), listener.accept()).await {
+                Ok(Ok((mut socket, _))) => {
+                    let mut buf = [0; 1024];
+                    match socket.read(&mut buf).await {
+                        Ok(n) => {
+                            let msg = String::from_utf8_lossy(&buf[..n]).trim().to_string();
+                            println!("Received message: {}", msg);
+
+                            // ACK transmission
+                            let ack_port = 8083; // Direct specification
+                            match TcpStream::connect(format!("127.0.0.1:{}", ack_port)).await {
+                                Ok(mut ack_socket) => {
+                                    if let Err(e) = ack_socket.write_all(b"ACK").await {
+                                        println!("ACK transmission error: {}", e);
+                                    } else {
+                                        println!("ACK sent to port {}.", ack_port);
+                                    }
+                                }
+                                Err(e) => {
+                                    println!(
+                                        "Could not connect to ACK transmission destination: {}",
+                                        e
+                                    );
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            println!("Message reading error: {}", e);
+                        }
+                    }
+                }
+                Ok(Err(e)) => println!("Connection acceptance error: {}", e),
+                Err(_) => println!("Connection acceptance timeout"),
             }
         }
     });
 
-    sender_handle.join().unwrap();
-    receiver_handle.join().unwrap();
-}
-```
+    ready_rx.recv().unwrap();
+    sleep(Duration::from_secs(1)).await;
 
-### Fault Detection and Automatic Recovery
+    let broker_sender = Arc::clone(&broker);
+    let sender_handle = tokio::spawn(async move {
+        for i in 0..10 {
+            let message = format!("Message {}", i);
+            let mut broker = broker_sender.lock().await;
+            match broker.send_message(message.clone()).await {
+                Ok(_) => println!("Message sent, ACK received: {}", message),
+                Err(e) => println!("Error: {}", e),
+            }
+            sleep(Duration::from_millis(500)).await;
+        }
+    });
 
-The system includes mechanisms for fault detection and automatic recovery. Nodes are monitored using heartbeat signals, and if a fault is detected, the system will attempt to recover automatically.
-
-```rust
-use pilgrimage::Broker;
-use std::sync::{Arc, Mutex};
-use std::thread;
-use std::time::Duration;
-
-fn main() {
-    let storage = Arc::new(Mutex::new(Storage::new("test_db_path").unwrap()));
-    let mut broker = Broker::new("broker_id", 1, 1, "test_db_path");
-    broker.storage = storage.clone();
-
-    // Simulating a disability
-    {
-        let mut storage_guard = storage.lock().unwrap();
-        storage_guard.available = false;
-    }
-
-    // Simulating a disability
-    broker.monitor_nodes();
-
-    // Simulating a disability
-    thread::sleep(Duration::from_millis(100));
-    let storage_guard = storage.lock().unwrap();
-    assert!(storage_guard.is_available());
+    tokio::try_join!(sender_handle, receiver_handle).unwrap();
 }
 ```
 
 ### Examples
 
-- Simple message sending and receiving
-- Sending and receiving multiple messages
-- Sending and receiving messages in multiple threads
 - Authentication processing example
-- Sending and receiving messages as an authenticated user
+- User authentication and message sending
+- Sending encrypted messages
+- Sending and receiving simple messages
+- Exactly-once Sending and receiving messages
 
 To execute a basic example, use the following command:
 
 ```bash
-cargo run --example simple-send-recv
-cargo run --example mulch-send-recv
-cargo run --example thread-send-recv
 cargo run --example auth-example
 cargo run --example auth-send-recv
+cargo run --example encrypt-send-recv
+cargo run --example idempotencw-send-recv
+cargo run --example simple-send-recv
 ```
 
 ### Bench
 
 If the allocated memory is small, it may fail.
+
+```sh
+message_processing/batch_messages/10
+                        time:   [86.418 ms 87.079 ms 87.433 ms]
+                        change: [+17.513% +18.664% +19.750%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+
+message_processing/batch_messages/50
+                        time:   [448.69 ms 451.67 ms 454.84 ms]
+                        change: [+8.5546% +11.944% +14.329%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+
+Benchmarking message_processing/batch_messages/100: Warming up for 3.0000 s
+message_processing/batch_messages/100
+                        time:   [941.48 ms 948.28 ms 954.95 ms]
+                        change: [+11.767% +12.760% +13.740%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+```
 
 `cargo bench`
 

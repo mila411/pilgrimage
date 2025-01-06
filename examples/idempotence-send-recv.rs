@@ -1,137 +1,76 @@
 use pilgrimage::broker::Broker;
-use pilgrimage::broker::storage::Storage;
-use pilgrimage::broker::transaction::Transaction;
-use pilgrimage::message::ack::Message;
-use serde::{Deserialize, Serialize};
-use std::sync::{Arc, Mutex};
-use std::time::SystemTime;
-use tokio;
-use uuid::Uuid;
+use std::sync::Arc;
+use tokio::io::AsyncReadExt;
+use tokio::io::AsyncWriteExt;
+use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::Mutex;
+use tokio::time::{Duration, sleep, timeout};
 
 #[tokio::main]
 async fn main() {
-    let token_manager = TokenManager::new();
-    let rbac = Rbac::new();
-    let encryptor = Encryptor::new();
+    let broker = Arc::new(Mutex::new(
+        Broker::new("broker1", 3, 2, "storage_path").await,
+    ));
 
-    let username = "user1";
-    let roles = vec!["admin".to_string()];
-    let token = token_manager.generate_token(username, roles).unwrap();
+    let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+    let receiver_handle = tokio::spawn(async move {
+        let listener = TcpListener::bind("127.0.0.1:8081").await.unwrap();
+        println!("The message recipient is waiting on port 8081.");
+        ready_tx.send(()).unwrap();
 
-    if let Ok(claims) = token_manager.verify_token(&token) {
-        let broker = Broker::new("broker1", 3, 2, "logs");
-        let storage = Arc::new(Mutex::new(Storage::new("messages.txt").unwrap()));
-        let mut transaction = Transaction::new(storage.clone());
+        for _ in 0..10 {
+            match timeout(Duration::from_secs(10), listener.accept()).await {
+                Ok(Ok((mut socket, _))) => {
+                    let mut buf = [0; 1024];
+                    match socket.read(&mut buf).await {
+                        Ok(n) => {
+                            let msg = String::from_utf8_lossy(&buf[..n]).trim().to_string();
+                            println!("Received message: {}", msg);
 
-        if rbac.has_permission(&claims.sub, &Permission::Write) {
-            let message = format!("Hello from {}", username);
-            match encryptor.encrypt(message.as_bytes()) {
-                Ok(encrypted_data) => {
-                    let msg = Message {
-                        id: Uuid::new_v4(),
-                        content: String::from_utf8_lossy(&encrypted_data).to_string(),
-                        timestamp: SystemTime::now(),
-                    };
-                    if !broker.is_message_processed(&msg.id) {
-                        transaction.add_message(msg.clone());
-                        match broker.send_message(msg.content.clone()).await {
-                            Ok(_) => {
-                                transaction.commit().unwrap();
-                                println!("Encrypted message sent and saved successfully");
-                            }
-                            Err(e) => {
-                                transaction.rollback().unwrap();
-                                println!("Failed to send message: {}", e);
+                            // ACK transmission
+                            let ack_port = 8083; // Direct specification
+                            match TcpStream::connect(format!("127.0.0.1:{}", ack_port)).await {
+                                Ok(mut ack_socket) => {
+                                    if let Err(e) = ack_socket.write_all(b"ACK").await {
+                                        println!("ACK transmission error: {}", e);
+                                    } else {
+                                        println!("ACK sent to port {}.", ack_port);
+                                    }
+                                }
+                                Err(e) => {
+                                    println!(
+                                        "Could not connect to ACK transmission destination: {}",
+                                        e
+                                    );
+                                }
                             }
                         }
-                    } else {
-                        println!("Message already processed");
+                        Err(e) => {
+                            println!("Message reading error: {}", e);
+                        }
                     }
                 }
-                Err(e) => println!("Encryption failed: {}", e),
+                Ok(Err(e)) => println!("Connection acceptance error: {}", e),
+                Err(_) => println!("Connection acceptance timeout"),
             }
         }
-    }
-}
+    });
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::sync::{Arc, Mutex};
+    ready_rx.recv().unwrap();
+    sleep(Duration::from_secs(1)).await;
 
-    #[tokio::test]
-    async fn test_exactly_once() {
-        let storage = Arc::new(Mutex::new(Storage::new("messages.txt").unwrap()));
-        let broker = Broker::new("broker1", 3, 2, "logs").await;
-        let message_id = Uuid::new_v4();
-        let message = Message {
-            id: message_id,
-            content: "Test message".to_string(),
-            timestamp: SystemTime::now(),
-        };
+    let broker_sender = Arc::clone(&broker);
+    let sender_handle = tokio::spawn(async move {
+        for i in 0..10 {
+            let message = format!("Message {}", i);
+            let mut broker = broker_sender.lock().await;
+            match broker.send_message(message.clone()).await {
+                Ok(_) => println!("Message sent, ACK received: {}", message),
+                Err(e) => println!("Error: {}", e),
+            }
+            sleep(Duration::from_millis(500)).await;
+        }
+    });
 
-        // 初回メッセージ送信
-        assert!(!broker.is_message_processed(&message.id));
-        broker.send_message(message.content.clone()).await.unwrap();
-        broker.save_message(&message).unwrap();
-        assert!(broker.is_message_processed(&message.id));
-
-        // 再度同じメッセージを送信
-        broker.send_message(message.content.clone()).await.unwrap();
-        assert!(broker.is_message_processed(&message.id));
-    }
-}
-
-struct TokenManager;
-impl TokenManager {
-    fn new() -> Self {
-        TokenManager
-    }
-
-    fn generate_token(&self, _username: &str, _roles: Vec<String>) -> Result<String, String> {
-        // トークン生成ロジック
-        Ok("dummy_token".to_string())
-    }
-
-    fn verify_token(&self, _token: &str) -> Result<Claims, String> {
-        // トークン検証ロジック
-        Ok(Claims {
-            sub: "user1".to_string(),
-            exp: 10000000000,
-        })
-    }
-}
-
-struct Rbac;
-impl Rbac {
-    fn new() -> Self {
-        Rbac
-    }
-
-    fn has_permission(&self, _user: &str, _permission: &Permission) -> bool {
-        // 権限チェックロジック
-        true
-    }
-}
-
-struct Encryptor;
-impl Encryptor {
-    fn new() -> Self {
-        Encryptor
-    }
-
-    fn encrypt(&self, data: &[u8]) -> Result<Vec<u8>, String> {
-        // 暗号化ロジック
-        Ok(data.to_vec())
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct Claims {
-    sub: String,
-    exp: usize,
-}
-
-enum Permission {
-    Write,
+    tokio::try_join!(sender_handle, receiver_handle).unwrap();
 }

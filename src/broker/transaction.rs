@@ -31,7 +31,7 @@ impl Transaction {
     }
 
     pub fn rollback(&self) -> Result<(), BrokerError> {
-        // ロールバックの実装（必要に応じて）
+        // TODO: Implement rollback (if necessary)
         Ok(())
     }
 }
