@@ -44,8 +44,36 @@ impl BrokerWrapper {
     }
 }
 
+/// Cloneable structure containing a thread-safe, mutable map of broker wrappers.
+///
+/// This structure contains a (hash) map of broker IDs to [`BrokerWrapper`] instances.
+/// It also implements the [`Clone`] trait to allow cloning of the state (deep copy).
+///
+/// # Example
+/// ```
+/// use std::{
+///     collections::HashMap,
+///     sync::{Arc, Mutex},
+/// };
+///
+/// fn main() {
+///     // Create a new AppState instance
+///     let state = AppState {
+///         brokers: Arc::new(Mutex::new(HashMap::new())),
+///     };
+/// }
+/// ```
+///
+/// # See also
+///
+/// * [`BrokerWrapper`]
+/// * [`Clone`]
+/// * [`Arc`]
+/// * [`Mutex`]
+/// * [`HashMap`]
 #[derive(Clone)]
 pub struct AppState {
+    /// A thread-safe hash map of broker IDs to [`BrokerWrapper`] instances.
     brokers: Arc<Mutex<HashMap<String, BrokerWrapper>>>,
 }
 
