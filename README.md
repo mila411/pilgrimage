@@ -30,7 +30,6 @@ Current Pilgrimage supports **At-least-once**.
 
 When using Pilgramage as a Crate, client authentication is implemented, but at present, authentication is not implemented for message sending and receiving from the CLI and web client. You can find a sample of authentication with Crate `examples/auth-example.rs`, `examples/auth-send-recv.rs`.
 
-
 ## Features
 
 - Topic-based pub/sub model
@@ -71,66 +70,6 @@ When using Pilgramage as a Crate, client authentication is implemented, but at p
 - **Log Compressions:** Compress and optimize logs.
 
 ### Basic usage
-
-```rust
-use pilgrimage::broker::{Broker, Node};
-use std::sync::{Arc, Mutex};
-
-fn main() {
-    // Broker Creation
-    let broker = Broker::new("broker1", 3, 2, "storage_path");
-
-    // Adding a node
-    let node = Node {
-        data: Arc::new(Mutex::new(Vec::new())),
-    };
-    broker.add_node("node1".to_string(), node);
-
-    // Send a message
-    broker.send_message("Hello, world!".to_string());
-
-    // Message received
-    if let Some(message) = broker.receive_message() {
-        println!("Received: {}", message);
-    }
-}
-```
-
-### Multi-threaded message processing
-
-```rust
-use pilgrimage::broker::Broker;
-use std::sync::Arc;
-use std::thread;
-
-fn main() {
-    let broker = Arc::new(Broker::new("broker1", 3, 2, "storage_path"));
-
-    let broker_sender = Arc::clone(&broker);
-    let sender_handle = thread::spawn(move || {
-        for i in 0..10 {
-            let message = format!("Message {}", i);
-            broker_sender.send_message(message);
-        }
-    });
-
-    let broker_receiver = Arc::clone(&broker);
-    let receiver_handle = thread::spawn(move || {
-        for _ in 0..10 {
-            if let Some(message) = broker_receiver.receive_message() {
-                println!("Received: {:?}", message);
-            }
-        }
-    });
-
-    sender_handle.join().unwrap();
-    receiver_handle.join().unwrap();
-}
-```
-
-### Fault Detection and Automatic Recovery
-
-The system includes mechanisms for fault detection and automatic recovery. Nodes are monitored using heartbeat signals, and if a fault is detected, the system will attempt to recover automatically.
 
 ```rust
 use pilgrimage::broker::Broker;
@@ -180,6 +119,71 @@ fn main() {
     // Give the remaining messages in the inbox time to process.
     thread::sleep(Duration::from_secs(1));
 }
+```
+
+### Multi-threaded message processing
+
+```rust
+use pilgrimage::broker::Broker;
+use pilgrimage::message::message::Message;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+    mpsc,
+};
+use std::thread;
+use std::time::Duration;
+
+fn main() {
+    let broker = Arc::new(Broker::new("broker1", 3, 2, "storage_path"));
+    let running = Arc::new(AtomicBool::new(true));
+    let (tx, rx) = mpsc::channel();
+
+    let broker_sender = Arc::clone(&broker);
+    let sender_running = Arc::clone(&running);
+    let sender_handle = thread::spawn(move || {
+        for i in 0..10 {
+            let content = format!("Message {}", i);
+            let message = Message::from(content);
+            println!("Send: ID={}, Content={}", message.id, message.content);
+
+            if let Err(e) = broker_sender.send_message(message) {
+                println!("Transmission error: {}", e);
+                return Err(e);
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
+        sender_running.store(false, Ordering::SeqCst);
+        tx.send(()).unwrap();
+        Ok(())
+    });
+
+    let broker_receiver = Arc::clone(&broker);
+    let receiver_running = Arc::clone(&running);
+    let receiver_handle = thread::spawn(move || {
+        while receiver_running.load(Ordering::SeqCst) {
+            if let Some(message) = broker_receiver.receive_message() {
+                println!("Received: ID={}, Content={}", message.id, message.content);
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
+    });
+
+    // Waiting for transmission to be completed
+    rx.recv().unwrap();
+
+    // Give the remaining messages in the inbox time to process.
+    thread::sleep(Duration::from_secs(1));
+    running.store(false, Ordering::SeqCst);
+
+    if let Err(e) = sender_handle.join() {
+        println!("Transmission thread error: {:?}", e);
+    }
+    if let Err(e) = receiver_handle.join() {
+        println!("Received thread error: {:?}", e);
+    }
+}
+
 ```
 
 ### Examples
