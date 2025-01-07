@@ -9,6 +9,8 @@ pub mod scaling;
 pub mod storage;
 pub mod topic;
 
+use uuid::Uuid;
+
 use crate::broker::consumer::group::ConsumerGroup;
 use crate::broker::error::BrokerError;
 use crate::broker::leader::{BrokerState, LeaderElection};
@@ -20,7 +22,7 @@ use crate::broker::topic::Topic;
 use crate::message::ack::MessageAck;
 use crate::message::message::Message;
 use crate::subscriber::types::Subscriber;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::Write;
 use std::path::Path;
@@ -53,6 +55,7 @@ pub struct Broker {
     leader: Arc<Mutex<Option<String>>>,
     pub message_queue: Arc<MessageQueue>,
     log_path: String,
+    processed_message_ids: Arc<Mutex<HashSet<Uuid>>>,
 }
 
 impl Broker {
@@ -104,6 +107,7 @@ impl Broker {
             leader: Arc::new(Mutex::new(None)),
             message_queue: Arc::new(MessageQueue::new(min_instances, max_instances)),
             log_path: log_path.to_string(),
+            processed_message_ids: Arc::new(Mutex::new(HashSet::new())),
         };
         broker.monitor_nodes();
         broker
@@ -114,7 +118,17 @@ impl Broker {
     }
 
     pub fn receive_message(&self) -> Option<Message> {
-        self.message_queue.receive()
+        if let Some(message) = self.message_queue.receive() {
+            let mut processed_ids = self.processed_message_ids.lock().unwrap();
+            if processed_ids.contains(&message.id) {
+                None
+            } else {
+                processed_ids.insert(message.id);
+                Some(message)
+            }
+        } else {
+            None
+        }
     }
 
     pub fn perform_operation_with_retry<F, T, E>(
