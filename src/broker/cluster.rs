@@ -125,7 +125,7 @@ mod tests {
             // Add message to queue
             let message_content = "test_message".to_string();
             let message = crate::message::message::Message::new(message_content);
-            broker2.message_queue.send(message);
+            let _ = broker2.message_queue.send(message);
         }
 
         cluster.monitor_cluster();

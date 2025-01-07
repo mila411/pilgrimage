@@ -59,7 +59,7 @@ impl ConsumerGroup {
     pub fn add_member(&self, consumer_id: &str, subscriber: Subscriber) {
         let mut members = self.members.lock().unwrap();
         members.insert(consumer_id.to_string(), GroupMember { subscriber });
-        drop(members); // メンバー追加後にロックを解放
+        drop(members); // Unlock after adding members
         self.rebalance_partitions();
     }
 
@@ -67,7 +67,7 @@ impl ConsumerGroup {
     fn rebalance_partitions(&self) {
         let members = self.members.lock().unwrap();
         let member_ids: Vec<_> = members.keys().cloned().collect();
-        drop(members); // メンバーリスト取得後にロックを解放
+        drop(members); // Unlock after obtaining the member list
 
         let mut assignments = self.assignments.lock().unwrap();
         assignments.clear();
@@ -86,6 +86,17 @@ impl ConsumerGroup {
                 .entry(member_id.clone())
                 .or_default()
                 .push(partition_id);
+        }
+    }
+
+    pub async fn deliver_message(&mut self, message: &str) -> Result<(), String> {
+        if let Ok(members) = self.members.lock() {
+            for member in members.values() {
+                (member.subscriber.callback)(message.to_string());
+            }
+            Ok(())
+        } else {
+            Err("Failed to acquire lock on members".to_string())
         }
     }
 }

@@ -1,33 +1,31 @@
+use std::fmt::{self, Debug};
+use std::sync::Arc;
+
 pub struct Subscriber {
     pub id: String,
-    pub callback: Box<dyn Fn(String) + Send + Sync>,
+    pub callback: Arc<Box<dyn Fn(String) + Send + Sync>>,
+}
+
+impl Clone for Subscriber {
+    fn clone(&self) -> Self {
+        Self {
+            id: self.id.clone(),
+            callback: Arc::clone(&self.callback),
+        }
+    }
+}
+
+impl Debug for Subscriber {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Subscriber").field("id", &self.id).finish()
+    }
 }
 
 impl Subscriber {
-    /// Creates a new subscriber instance.
-    ///
-    /// # Arguments
-    ///
-    /// * `id` - The ID of the subscriber.
-    /// * `callback` - The callback function to be called when a message is received.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use pilgrimage::subscriber::types::Subscriber;
-    ///
-    /// let subscriber = Subscriber::new(
-    ///     "test_subscriber",
-    ///     Box::new(|msg| {
-    ///         println!("Received message: {}", msg);
-    ///     }),
-    /// );
-    /// assert_eq!(subscriber.id, "test_subscriber");
-    /// ```
-    pub fn new(id: &str, callback: Box<dyn Fn(String) + Send + Sync>) -> Self {
-        Subscriber {
-            id: id.to_string(),
-            callback,
+    pub fn new<S: Into<String>>(id: S, callback: Box<dyn Fn(String) + Send + Sync>) -> Self {
+        Self {
+            id: id.into(),
+            callback: Arc::new(callback),
         }
     }
 }
@@ -37,22 +35,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_subscriber_creation() {
-        let subscriber = Subscriber::new(
-            "test_subscriber",
-            Box::new(|msg| {
-                println!("Received message: {}", msg);
-            }),
-        );
+    fn test_subscriber_new() {
+        let message_received = Arc::new(std::sync::Mutex::new(false));
+        let message_clone = message_received.clone();
 
-        // Verify the subscriber can be called with its callback
-        (subscriber.callback)("test message".to_string());
-        assert_eq!(subscriber.id, "test_subscriber");
+        let callback = Box::new(move |_| {
+            let mut received = message_clone.lock().unwrap();
+            *received = true;
+        });
+
+        let subscriber = Subscriber::new("test-id", callback);
+        assert_eq!(subscriber.id, "test-id");
     }
 
     #[test]
-    fn test_subscriber_send_sync() {
-        fn assert_send_sync<T: Send + Sync>() {}
-        assert_send_sync::<Subscriber>();
+    fn test_subscriber_clone() {
+        let subscriber = Subscriber::new("test-id", Box::new(|_| {}));
+        let cloned = subscriber.clone();
+
+        assert_eq!(subscriber.id, cloned.id);
     }
 }

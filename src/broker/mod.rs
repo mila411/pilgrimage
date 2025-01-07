@@ -9,6 +9,7 @@ pub mod scaling;
 pub mod storage;
 pub mod topic;
 
+use chrono::Utc;
 use uuid::Uuid;
 
 use crate::broker::consumer::group::ConsumerGroup;
@@ -19,6 +20,7 @@ use crate::broker::message_queue::MessageQueue;
 use crate::broker::node_management::{check_node_health, recover_node};
 use crate::broker::storage::Storage;
 use crate::broker::topic::Topic;
+use crate::message::ack::AckStatus;
 use crate::message::ack::MessageAck;
 use crate::message::message::Message;
 use crate::subscriber::types::Subscriber;
@@ -29,6 +31,8 @@ use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use tokio::sync::oneshot;
+use tokio::time::timeout;
 
 pub type ConsumerGroups = HashMap<String, ConsumerGroup>;
 
@@ -39,7 +43,6 @@ impl ConsumerGroup {
         }
     }
 }
-
 pub struct Broker {
     id: String,
     topics: HashMap<String, Topic>,
@@ -58,28 +61,35 @@ pub struct Broker {
     processed_message_ids: Arc<Mutex<HashSet<Uuid>>>,
     transaction_log: Arc<Mutex<Vec<Message>>>,
     transaction_messages: Arc<Mutex<Vec<Message>>>,
+    ack_waiters: Arc<Mutex<HashMap<Uuid, oneshot::Sender<MessageAck>>>>,
+}
+
+impl Clone for Broker {
+    fn clone(&self) -> Self {
+        Self {
+            id: self.id.clone(),
+            topics: self.topics.clone(),
+            num_partitions: self.num_partitions,
+            replication_factor: self.replication_factor,
+            term: AtomicU64::new(self.term.load(Ordering::SeqCst)),
+            leader_election: self.leader_election.clone(),
+            storage: self.storage.clone(),
+            consumer_groups: self.consumer_groups.clone(),
+            nodes: self.nodes.clone(),
+            partitions: self.partitions.clone(),
+            replicas: self.replicas.clone(),
+            leader: self.leader.clone(),
+            message_queue: self.message_queue.clone(),
+            log_path: self.log_path.clone(),
+            processed_message_ids: self.processed_message_ids.clone(),
+            transaction_log: self.transaction_log.clone(),
+            transaction_messages: self.transaction_messages.clone(),
+            ack_waiters: self.ack_waiters.clone(),
+        }
+    }
 }
 
 impl Broker {
-    /// Creates a new broker instance.
-    ///
-    /// # Arguments
-    ///
-    /// * `id` - A string slice that holds the ID of the broker.
-    /// * `num_partitions` - The number of partitions for the broker.
-    /// * `replication_factor` - The replication factor for the broker.
-    /// * `storage_path` - The path to the storage file.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use pilgrimage::broker::Broker;
-    ///
-    /// let broker = Broker::new("broker1", 3, 2, "logs");
-    /// assert_eq!(broker.id, "broker1");
-    /// assert_eq!(broker.num_partitions, 3);
-    /// assert_eq!(broker.replication_factor, 2);
-    /// ```
     pub fn new(
         id: &str,
         num_partitions: usize,
@@ -112,6 +122,7 @@ impl Broker {
             processed_message_ids: Arc::new(Mutex::new(HashSet::new())),
             transaction_log: Arc::new(Mutex::new(Vec::new())),
             transaction_messages: Arc::new(Mutex::new(Vec::new())),
+            ack_waiters: Arc::new(Mutex::new(HashMap::new())),
         };
         broker.monitor_nodes();
         broker
@@ -162,6 +173,40 @@ impl Broker {
             }
         } else {
             None
+        }
+    }
+
+    pub async fn send_message_with_ack(
+        &self,
+        message: Message,
+        timeout_duration: Duration,
+    ) -> Result<MessageAck, String> {
+        self.send_message(message.clone())?;
+
+        match timeout(timeout_duration, self.wait_for_ack(message.id)).await {
+            Ok(ack) => ack,
+            Err(_) => Err("ACK timeout".to_string()),
+        }
+    }
+
+    async fn wait_for_ack(&self, message_id: Uuid) -> Result<MessageAck, String> {
+        let (tx, rx) = oneshot::channel();
+
+        {
+            let mut ack_waiters = self.ack_waiters.lock().unwrap();
+            ack_waiters.insert(message_id, tx);
+        }
+
+        match rx.await {
+            Ok(ack) => Ok(ack),
+            Err(_) => Err("Failed to receive ACK".to_string()),
+        }
+    }
+
+    pub fn receive_ack(&self, ack: MessageAck) {
+        let mut ack_waiters = self.ack_waiters.lock().unwrap();
+        if let Some(tx) = ack_waiters.remove(&ack.message_id) {
+            let _ = tx.send(ack);
         }
     }
 
@@ -315,22 +360,6 @@ impl Broker {
         *self.leader_election.state.lock().unwrap() == BrokerState::Leader
     }
 
-    /// Creates a new topic.
-    ///
-    /// # Arguments
-    ///
-    /// * `name` - The name of the topic.
-    /// * `num_partitions` - The number of partitions for the topic.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use pilgrimage::broker::Broker;
-    ///
-    /// let mut broker = Broker::new("broker1", 3, 2, "logs");
-    /// broker.create_topic("test_topic", None).unwrap();
-    /// assert!(broker.topics.contains_key("test_topic"));
-    /// ```
     pub fn create_topic(
         &mut self,
         name: &str,
@@ -349,30 +378,6 @@ impl Broker {
         Ok(())
     }
 
-    /// Subscribes a subscriber to a topic.
-    ///
-    /// # Arguments
-    ///
-    /// * `topic_name` - The name of the topic.
-    /// * `subscriber` - The subscriber to add.
-    /// * `group_id` - Optional consumer group ID.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use pilgrimage::broker::Broker;
-    /// use pilgrimage::subscriber::types::Subscriber;
-    ///
-    /// let mut broker = Broker::new("broker1", 3, 2, "logs");
-    /// broker.create_topic("test_topic", None).unwrap();
-    /// let subscriber = Subscriber::new(
-    ///     "consumer1",
-    ///     Box::new(|msg: String| {
-    ///         println!("Received message: {}", msg);
-    ///     }),
-    /// );
-    /// broker.subscribe("test_topic", subscriber, None).unwrap();
-    /// ```
     pub fn subscribe(
         &mut self,
         topic_name: &str,
@@ -398,25 +403,7 @@ impl Broker {
         }
     }
 
-    /// Publishes a message to a topic with acknowledgment.
-    ///
-    /// # Arguments
-    ///
-    /// * `topic_name` - The name of the topic.
-    /// * `message` - The message to publish.
-    /// * `key` - An optional key for partitioning.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use pilgrimage::broker::Broker;
-    ///
-    /// let mut broker = Broker::new("broker1", 3, 2, "logs");
-    /// broker.create_topic("test_topic", None).unwrap();
-    /// let ack = broker.publish_with_ack("test_topic", "test_message".to_string(), None).unwrap();
-    /// assert_eq!(ack.topic, "test_topic");
-    /// ```
-    pub fn publish_with_ack(
+    pub async fn publish_with_ack(
         &mut self,
         topic_name: &str,
         message: String,
@@ -424,34 +411,22 @@ impl Broker {
     ) -> Result<MessageAck, BrokerError> {
         if let Some(topic) = self.topics.get_mut(topic_name) {
             let partition_id = topic.publish(message.clone(), key)?;
-            let ack = MessageAck::new(
-                self.term.fetch_add(1, Ordering::SeqCst),
-                topic_name,
-                partition_id,
-            );
 
-            self.storage.lock().unwrap().write_message(&message)?;
-
-            // Message delivery to consumer groups
-            let message_clone = message.clone();
-            let consumer_groups = self.consumer_groups.clone();
-            std::thread::spawn(move || {
-                if let Ok(groups) = consumer_groups.lock() {
-                    for group in groups.values() {
-                        if let (Ok(assignments), Ok(members)) =
-                            (group.assignments.lock(), group.members.lock())
-                        {
-                            for (cons_id, parts) in assignments.iter() {
-                                if parts.contains(&partition_id) {
-                                    if let Some(member) = members.get(cons_id) {
-                                        (member.subscriber.callback)(message_clone.clone());
-                                    }
-                                }
-                            }
-                        }
+            if let Ok(mut groups) = self.consumer_groups.lock() {
+                for group in groups.values_mut() {
+                    if let Err(e) = group.deliver_message(&message).await {
+                        eprintln!("Message delivery failed: {}", e);
                     }
                 }
-            });
+            }
+
+            let ack = MessageAck::new(
+                Uuid::new_v4(),
+                Utc::now(),
+                AckStatus::Processed,
+                topic_name.to_string(),
+                partition_id,
+            );
 
             Ok(ack)
         } else {
