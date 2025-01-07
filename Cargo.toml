@@ -1,6 +1,6 @@
 [package]
 name = "pilgrimage"
-version = "0.10.4"
+version = "0.10.5"
 edition = "2024"
 authors = ["Kenny Miller Song"]
 description = "A Kafka-like message broker in Rust"
