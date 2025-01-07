@@ -9,6 +9,8 @@ pub mod scaling;
 pub mod storage;
 pub mod topic;
 
+use uuid::Uuid;
+
 use crate::broker::consumer::group::ConsumerGroup;
 use crate::broker::error::BrokerError;
 use crate::broker::leader::{BrokerState, LeaderElection};
@@ -18,8 +20,9 @@ use crate::broker::node_management::{check_node_health, recover_node};
 use crate::broker::storage::Storage;
 use crate::broker::topic::Topic;
 use crate::message::ack::MessageAck;
+use crate::message::message::Message;
 use crate::subscriber::types::Subscriber;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::Write;
 use std::path::Path;
@@ -38,20 +41,23 @@ impl ConsumerGroup {
 }
 
 pub struct Broker {
-    pub id: String,
-    pub topics: HashMap<String, Topic>,
-    pub num_partitions: usize,
-    pub replication_factor: usize,
-    pub term: AtomicU64,
-    pub leader_election: LeaderElection,
-    pub storage: Arc<Mutex<Storage>>,
-    pub consumer_groups: Arc<Mutex<HashMap<String, ConsumerGroup>>>,
-    pub nodes: Arc<Mutex<HashMap<String, Node>>>,
-    partitions: Arc<Mutex<HashMap<usize, Partition>>>,
-    pub replicas: Arc<Mutex<HashMap<String, Vec<String>>>>,
-    pub leader: Arc<Mutex<Option<String>>>,
+    id: String,
+    topics: HashMap<String, Topic>,
+    num_partitions: usize,
+    replication_factor: usize,
+    term: AtomicU64,
+    leader_election: LeaderElection,
+    storage: Arc<Mutex<Storage>>,
+    consumer_groups: Arc<Mutex<HashMap<String, ConsumerGroup>>>,
+    nodes: Arc<Mutex<HashMap<String, Node>>>,
+    partitions: Arc<Mutex<HashMap<String, Partition>>>,
+    replicas: Arc<Mutex<HashMap<String, Vec<String>>>>,
+    leader: Arc<Mutex<Option<String>>>,
     pub message_queue: Arc<MessageQueue>,
     log_path: String,
+    processed_message_ids: Arc<Mutex<HashSet<Uuid>>>,
+    transaction_log: Arc<Mutex<Vec<Message>>>,
+    transaction_messages: Arc<Mutex<Vec<Message>>>,
 }
 
 impl Broker {
@@ -82,7 +88,7 @@ impl Broker {
     ) -> Self {
         let min_instances = 1;
         let max_instances = 10;
-        let check_interval = Duration::from_secs(30);
+        let _check_interval = Duration::from_secs(30);
         let peers = HashMap::new(); //TODO it reads from the settings
         let leader_election = LeaderElection::new(id, peers);
         let storage = Storage::new(storage_path).expect("Failed to initialize storage");
@@ -101,15 +107,62 @@ impl Broker {
             partitions: Arc::new(Mutex::new(HashMap::new())),
             replicas: Arc::new(Mutex::new(HashMap::new())),
             leader: Arc::new(Mutex::new(None)),
-            message_queue: Arc::new(MessageQueue::new(
-                min_instances,
-                max_instances,
-                check_interval,
-            )),
+            message_queue: Arc::new(MessageQueue::new(min_instances, max_instances)),
             log_path: log_path.to_string(),
+            processed_message_ids: Arc::new(Mutex::new(HashSet::new())),
+            transaction_log: Arc::new(Mutex::new(Vec::new())),
+            transaction_messages: Arc::new(Mutex::new(Vec::new())),
         };
         broker.monitor_nodes();
         broker
+    }
+
+    pub fn begin_transaction(&self) {
+        let mut messages = self.transaction_messages.lock().unwrap();
+        messages.clear();
+    }
+
+    pub fn commit_transaction(&self) -> Result<(), String> {
+        let log = self.transaction_log.lock().unwrap();
+        let mut processed_ids = self.processed_message_ids.lock().unwrap();
+
+        for message in log.iter() {
+            if processed_ids.contains(&message.id) {
+                return Err("Duplicate message detected.".to_string());
+            }
+        }
+
+        for message in log.iter() {
+            self.message_queue.send(message.clone())?;
+            processed_ids.insert(message.id);
+        }
+
+        Ok(())
+    }
+
+    pub fn rollback_transaction(&self) {
+        let mut log = self.transaction_log.lock().unwrap();
+        log.clear();
+    }
+
+    pub fn send_message(&self, message: Message) -> Result<(), String> {
+        let mut messages = self.transaction_messages.lock().unwrap();
+        messages.push(message);
+        Ok(())
+    }
+
+    pub fn receive_message(&self) -> Option<Message> {
+        if let Some(message) = self.message_queue.receive() {
+            let mut processed_ids = self.processed_message_ids.lock().unwrap();
+            if processed_ids.contains(&message.id) {
+                None
+            } else {
+                processed_ids.insert(message.id);
+                Some(message)
+            }
+        } else {
+            None
+        }
     }
 
     pub fn perform_operation_with_retry<F, T, E>(
@@ -120,17 +173,17 @@ impl Broker {
     ) -> Result<T, E>
     where
         F: Fn() -> Result<T, E>,
+        E: std::fmt::Debug,
     {
-        let mut attempts = 0;
+        let mut retries = 0;
         loop {
             match operation() {
                 Ok(result) => return Ok(result),
-                Err(e) => {
-                    if attempts >= max_retries {
-                        return Err(e);
+                Err(err) => {
+                    if retries >= max_retries {
+                        return Err(err);
                     }
-                    attempts += 1;
-                    println!("Operation failed. Retry {} times...", attempts);
+                    retries += 1;
                     std::thread::sleep(delay);
                 }
             }
@@ -175,18 +228,13 @@ impl Broker {
         true
     }
 
-    pub fn send_message(&self, message: String) {
-        self.message_queue.send(message);
-    }
-
-    pub fn receive_message(&self) -> Option<String> {
-        Some(self.message_queue.receive())
-    }
-
-    pub fn replicate_data(&self, partition_id: usize, data: &[u8]) {
+    pub fn replicate_data(&self, partition_id: &str, data: &[u8]) {
         let replicas = self.replicas.lock().unwrap();
-        if let Some(nodes) = replicas.get(&partition_id.to_string()) {
-            for node_id in nodes {
+        if let Some(nodes) = replicas.get(partition_id) {
+            let partition_id_usize = partition_id.parse::<usize>().expect("Invalid partition_id");
+            let num_nodes = nodes.len();
+            let node_index = partition_id_usize % num_nodes;
+            if let Some(node_id) = nodes.get(node_index) {
                 if let Some(node) = self.nodes.lock().unwrap().get(node_id) {
                     let mut node_data = node.data.lock().unwrap();
                     node_data.clear();
@@ -245,7 +293,8 @@ impl Broker {
 
         let mut partitions = self.partitions.lock().unwrap();
         for (partition_id, partition) in partitions.iter_mut() {
-            let node_index = partition_id % num_nodes;
+            let partition_id_usize = partition_id.parse::<usize>().expect("Invalid partition_id");
+            let node_index = partition_id_usize % num_nodes;
             let node_id = nodes.keys().nth(node_index).unwrap().clone();
             partition.node_id = node_id;
         }

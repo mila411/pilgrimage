@@ -1,8 +1,9 @@
 use pilgrimage::broker::Broker;
+use pilgrimage::message::message::Message;
 use pilgrimage::schema::registry::SchemaRegistry;
-use pilgrimage::subscriber::types::Subscriber;
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::Duration;
 
 fn main() {
     // Create a schema registry
@@ -18,36 +19,29 @@ fn main() {
     // Create a topic
     {
         let mut broker = broker.lock().unwrap();
-        broker.create_topic("test_topic", None).unwrap();
+        broker.create_topic("test_topic", Some(1)).unwrap();
     }
 
-    // Create a producer
-    let broker_producer = Arc::clone(&broker);
-    let producer_handle = thread::spawn(move || {
-        let message = "test_message".to_string();
-        let mut broker = broker_producer.lock().unwrap();
-        broker
-            .publish_with_ack("test_topic", message, None)
-            .unwrap();
+    // Create a subscriber
+    let broker_clone = Arc::clone(&broker);
+    let _subscriber = thread::spawn(move || {
+        loop {
+            let mut broker = broker_clone.lock().unwrap();
+            if let Some(message) = broker.receive_message() {
+                println!("Received: ID={}, Content={}", message.id, message.content);
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
     });
 
-    // Create a consumer
-    let broker_consumer = Arc::clone(&broker);
-    let consumer_handle = thread::spawn(move || {
-        let subscriber = Subscriber::new(
-            "consumer_1",
-            Box::new(move |msg: String| {
-                println!("Consumed message: {}", msg);
-            }),
-        );
-        broker_consumer
-            .lock()
-            .unwrap()
-            .subscribe("test_topic", subscriber, Some("group1"))
-            .unwrap();
-    });
+    // Send a message
+    {
+        let mut broker = broker.lock().unwrap();
+        let message = Message::new("Hello, world!".to_string());
+        println!("Send: ID={}, Content={}", message.id, message.content);
+        broker.send_message(message).unwrap();
+    }
 
-    // Wait for producer and consumer to finish
-    producer_handle.join().unwrap();
-    consumer_handle.join().unwrap();
+    // Give the remaining messages in the inbox time to process.
+    thread::sleep(Duration::from_secs(1));
 }
