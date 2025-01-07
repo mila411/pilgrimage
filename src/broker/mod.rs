@@ -56,6 +56,8 @@ pub struct Broker {
     pub message_queue: Arc<MessageQueue>,
     log_path: String,
     processed_message_ids: Arc<Mutex<HashSet<Uuid>>>,
+    transaction_log: Arc<Mutex<Vec<Message>>>,
+    transaction_messages: Arc<Mutex<Vec<Message>>>,
 }
 
 impl Broker {
@@ -108,13 +110,45 @@ impl Broker {
             message_queue: Arc::new(MessageQueue::new(min_instances, max_instances)),
             log_path: log_path.to_string(),
             processed_message_ids: Arc::new(Mutex::new(HashSet::new())),
+            transaction_log: Arc::new(Mutex::new(Vec::new())),
+            transaction_messages: Arc::new(Mutex::new(Vec::new())),
         };
         broker.monitor_nodes();
         broker
     }
 
+    pub fn begin_transaction(&self) {
+        let mut messages = self.transaction_messages.lock().unwrap();
+        messages.clear();
+    }
+
+    pub fn commit_transaction(&self) -> Result<(), String> {
+        let log = self.transaction_log.lock().unwrap();
+        let mut processed_ids = self.processed_message_ids.lock().unwrap();
+
+        for message in log.iter() {
+            if processed_ids.contains(&message.id) {
+                return Err("Duplicate message detected.".to_string());
+            }
+        }
+
+        for message in log.iter() {
+            self.message_queue.send(message.clone())?;
+            processed_ids.insert(message.id);
+        }
+
+        Ok(())
+    }
+
+    pub fn rollback_transaction(&self) {
+        let mut log = self.transaction_log.lock().unwrap();
+        log.clear();
+    }
+
     pub fn send_message(&self, message: Message) -> Result<(), String> {
-        self.message_queue.send(message)
+        let mut messages = self.transaction_messages.lock().unwrap();
+        messages.push(message);
+        Ok(())
     }
 
     pub fn receive_message(&self) -> Option<Message> {
