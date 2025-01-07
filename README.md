@@ -161,25 +161,35 @@ fn main() {
 
 ### Examples
 
-- Simple message sending and receiving
-- Sending and receiving multiple messages
-- Sending and receiving messages in multiple threads
-- Authentication processing example
-- Sending and receiving messages as an authenticated user
-
 To execute a basic example, use the following command:
 
 ```bash
-cargo run --example simple-send-recv
-cargo run --example mulch-send-recv
-cargo run --example thread-send-recv
+cargo run --example ack-send-recv
 cargo run --example auth-example
 cargo run --example auth-send-recv
+cargo run --example simple-send-recv
+cargo run --example thread-send-recv
+cargo run --example transaction-send-recv
 ```
 
 ### Bench
 
 If the allocated memory is small, it may fail.
+
+```sh
+Gnuplot not found, using plotters backend
+send_message            time:   [849.75 ns 851.33 ns 853.18 ns]
+                        change: [-23.318% -20.131% -18.021%] (p = 0.00 < 0.05)
+                        Performance has improved.
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+
+send_benchmark_message  time:   [850.69 ns 852.08 ns 853.67 ns]
+                        change: [-33.444% -26.669% -22.423%] (p = 0.00 < 0.05)
+                        Performance has improved.
+Found 2 outliers among 100 measurements (2.00%)
+  2 (2.00%) high mild
+```
 
 `cargo bench`
 
