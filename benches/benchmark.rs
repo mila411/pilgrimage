@@ -1,51 +1,27 @@
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
-use pilgrimage::broker::{Broker, Node};
+use pilgrimage::broker::Broker;
+use pilgrimage::message::message::Message;
 use std::sync::{Arc, Mutex};
 
-fn broker_benchmark(c: &mut Criterion) {
-    // Brokerの初期化
-    let broker = Broker::new("broker1", 3, 2, "storage_path");
+fn benchmark_broker(c: &mut Criterion) {
+    let broker = Arc::new(Mutex::new(Broker::new("broker1", 3, 2, "logs")));
 
-    // ノードの追加
-    let node1 = Node {
-        address: "127.0.0.1".to_string(),
-        id: "node1".to_string(),
-        is_active: true,
-        data: Arc::new(Mutex::new(Vec::new())),
-    };
-    let node2 = Node {
-        address: "127.0.0.1".to_string(),
-        id: "node2".to_string(),
-        is_active: true,
-        data: Arc::new(Mutex::new(Vec::new())),
-    };
-    broker.add_node("node1".to_string(), node1);
-    broker.add_node("node2".to_string(), node2);
-
-    let mut group = c.benchmark_group("broker_benchmarks");
-
-    group.bench_function("start_election", |b| {
+    c.bench_function("send_message", |b| {
         b.iter(|| {
-            black_box(broker.start_election());
+            let broker = broker.lock().unwrap();
+            let _ = black_box(broker.send_message(Message::from("test message".to_string())));
         })
     });
 
-    group.bench_function("send_message", |b| {
+    c.bench_function("send_benchmark_message", |b| {
         b.iter(|| {
-            black_box(broker.send_message("test message".to_string()));
+            let broker = broker.lock().unwrap();
+            broker
+                .send_message(Message::from("benchmark message".to_string()))
+                .unwrap();
         })
     });
-
-    group.bench_function("receive_message", |b| {
-        b.iter(|| {
-            // 受信前にメッセージを送信
-            broker.send_message("benchmark message".to_string());
-            black_box(broker.receive_message());
-        })
-    });
-
-    group.finish();
 }
 
-criterion_group!(benches, broker_benchmark);
+criterion_group!(benches, benchmark_broker);
 criterion_main!(benches);
