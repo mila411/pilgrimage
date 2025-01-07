@@ -133,29 +133,52 @@ fn main() {
 The system includes mechanisms for fault detection and automatic recovery. Nodes are monitored using heartbeat signals, and if a fault is detected, the system will attempt to recover automatically.
 
 ```rust
-use pilgrimage::Broker;
+use pilgrimage::broker::Broker;
+use pilgrimage::message::message::Message;
+use pilgrimage::schema::registry::SchemaRegistry;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
 fn main() {
-    let storage = Arc::new(Mutex::new(Storage::new("test_db_path").unwrap()));
-    let mut broker = Broker::new("broker_id", 1, 1, "test_db_path");
-    broker.storage = storage.clone();
+    // Create a schema registry
+    let schema_registry = SchemaRegistry::new();
+    let schema_def = r#"{"type":"record","name":"test","fields":[{"name":"id","type":"string"}]}"#;
+    schema_registry
+        .register_schema("test_topic", schema_def)
+        .unwrap();
 
-    // Simulating a disability
+    // Create a broker
+    let broker = Arc::new(Mutex::new(Broker::new("broker1", 3, 2, "logs")));
+
+    // Create a topic
     {
-        let mut storage_guard = storage.lock().unwrap();
-        storage_guard.available = false;
+        let mut broker = broker.lock().unwrap();
+        broker.create_topic("test_topic", Some(1)).unwrap();
     }
 
-    // Simulating a disability
-    broker.monitor_nodes();
+    // Create a subscriber
+    let broker_clone = Arc::clone(&broker);
+    let _subscriber = thread::spawn(move || {
+        loop {
+            let broker = broker_clone.lock().unwrap();
+            if let Some(message) = broker.receive_message() {
+                println!("Received: ID={}, Content={}", message.id, message.content);
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
+    });
 
-    // Simulating a disability
-    thread::sleep(Duration::from_millis(100));
-    let storage_guard = storage.lock().unwrap();
-    assert!(storage_guard.is_available());
+    // Send a message
+    {
+        let broker = broker.lock().unwrap();
+        let message = Message::new("Hello, world!".to_string());
+        println!("Send: ID={}, Content={}", message.id, message.content);
+        broker.send_message(message).unwrap();
+    }
+
+    // Give the remaining messages in the inbox time to process.
+    thread::sleep(Duration::from_secs(1));
 }
 ```
 
