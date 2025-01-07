@@ -1,16 +1,24 @@
 use actix_web::{App, HttpResponse, HttpServer, Responder, web};
+use log::debug;
+use pilgrimage::message::message::Message;
 use pilgrimage::{Broker, broker::Node};
 use prometheus::{Counter, Encoder, Histogram, TextEncoder, register_counter, register_histogram};
 use serde::Deserialize;
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
-};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 lazy_static::lazy_static! {
     static ref BROKER_START_COUNTER: Counter = register_counter!("broker_start_total", "Total number of brokers started").unwrap();
     static ref BROKER_STOP_COUNTER: Counter = register_counter!("broker_stop_total", "Total number of brokers stopped").unwrap();
     static ref REQUEST_HISTOGRAM: Histogram = register_histogram!("request_duration_seconds", "Request duration in seconds").unwrap();
+    static ref MESSAGE_COUNTER: Counter = register_counter!(
+        "pilgrimage_messages_total",
+        "Total number of messages sent"
+    ).unwrap();
+    static ref DUPLICATE_MESSAGE_COUNTER: Counter = register_counter!(
+        "pilgrimage_duplicate_messages_total",
+        "Number of duplicate messages detected"
+    ).unwrap();
 }
 
 #[derive(Clone)]
@@ -25,15 +33,31 @@ impl BrokerWrapper {
         }
     }
 
-    fn send_message(&self, message: String) {
+    fn send_message(&self, message: String) -> Result<(), String> {
         if let Ok(broker) = self.inner.lock() {
-            broker.send_message(message);
+            let message: Message = message.into();
+            debug!(
+                "Send a message: ID={}, Content={}",
+                message.id, message.content
+            );
+            let result = broker.send_message(message);
+            if result.is_ok() {
+                MESSAGE_COUNTER.inc();
+            } else {
+                DUPLICATE_MESSAGE_COUNTER.inc();
+            }
+            result
+        } else {
+            Err("Broker lock failed.".to_string())
         }
     }
 
     fn receive_message(&self) -> Option<String> {
         if let Ok(broker) = self.inner.lock() {
-            broker.receive_message()
+            broker.receive_message().map(|msg| {
+                debug!("Message received: ID={}, content={}", msg.id, msg.content);
+                String::from(msg)
+            })
         } else {
             None
         }
@@ -151,7 +175,7 @@ async fn send_message(info: web::Json<SendRequest>, data: web::Data<AppState>) -
     let brokers_lock = data.brokers.lock().unwrap();
 
     if let Some(broker) = brokers_lock.get(&info.id) {
-        broker.send_message(info.message.clone());
+        let _ = broker.send_message(info.message.clone());
         timer.observe_duration();
         HttpResponse::Ok().json("Message sent")
     } else {

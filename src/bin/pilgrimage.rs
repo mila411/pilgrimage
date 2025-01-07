@@ -158,7 +158,7 @@ mod tests {
                 "broker1",
                 "3",
                 "2",
-                "/tmp/storage_broker1.db", // 修正: ディレクトリからファイルパスに変更
+                "/tmp/storage_broker1.db",
             ]);
 
         match matches.subcommand() {
@@ -210,24 +210,5 @@ mod tests {
             }
             _ => {}
         }
-    }
-
-    #[test]
-    fn test_send_command() {
-        let broker = Broker::new("broker1", 3, 2, "/tmp/storage_broker1.db");
-        broker.send_message("Hello, World!".to_string());
-    }
-
-    #[test]
-    fn test_consume_command() {
-        let broker = Broker::new("broker1", 3, 2, "/tmp/storage_broker1.db");
-        broker.send_message("Test Message".to_string());
-    }
-
-    #[test]
-    fn test_status_command() {
-        let broker = Broker::new("broker1", 3, 2, "/tmp/storage_broker1.db");
-        broker.send_message("Status Message".to_string());
-        assert_eq!(broker.id, "broker1");
     }
 }

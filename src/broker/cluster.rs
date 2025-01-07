@@ -123,7 +123,9 @@ mod tests {
             *state = BrokerState::Leader;
 
             // Add message to queue
-            broker2.message_queue.send("test_message".to_string());
+            let message_content = "test_message".to_string();
+            let message = crate::message::message::Message::new(message_content);
+            broker2.message_queue.send(message);
         }
 
         cluster.monitor_cluster();
