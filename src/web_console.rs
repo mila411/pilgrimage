@@ -39,18 +39,49 @@ lazy_static::lazy_static! {
     ).unwrap();
 }
 
+/// The `BrokerWrapper` struct is designed to wrap around a [`Broker`] instance,
+/// providing thread-safe access and operations for [sending][`BrokerWrapper::send_message`]
+/// and [receiving][`BrokerWrapper::receive_message`] messages.
+/// It also includes a [method to check the health][`BrokerWrapper::is_healthy`] of the broker.
+///
+/// The struct also implements the [`Clone`] property to allow cloning of the state (deep copy).
 #[derive(Clone)]
 struct BrokerWrapper {
+    /// An `Arc<Mutex<Broker>>` that encapsulates the broker instance
+    /// to ensure thread-safe operations.
     inner: Arc<Mutex<Broker>>,
 }
 
 impl BrokerWrapper {
+    /// Creates a new `BrokerWrapper` instance with the given [`Broker`] instance.
+    ///
+    /// # Arguments
+    /// * `broker` - A [`Broker`] instance to be wrapped by the `BrokerWrapper`.
+    ///
+    /// # Returns
+    /// A new `BrokerWrapper` instance with the given [`Broker`] instance.
     fn new(broker: Broker) -> Self {
         Self {
             inner: Arc::new(Mutex::new(broker)),
         }
     }
 
+    /// Sends a message to the broker.
+    ///
+    /// It converts the given string message into a [`Message`] object,
+    /// logs the message details (debug level),
+    /// and increments prometheus counters based on the result:
+    /// * [`MESSAGE_COUNTER`]
+    /// * [`DUPLICATE_MESSAGE_COUNTER`]
+    ///
+    /// # Arguments
+    /// * `message` - A [`String`] representing the message to be sent.
+    ///
+    /// # Returns
+    /// `Result<(), String>`: Returns `Ok(())` if the message was sent successfully,
+    /// or an error message if:
+    ///   1. the broker lock fails;
+    ///   2. if sending the message fails.
     fn send_message(&self, message: String) -> Result<(), String> {
         if let Ok(broker) = self.inner.lock() {
             let message: Message = message.into();
@@ -70,6 +101,14 @@ impl BrokerWrapper {
         }
     }
 
+    /// Receives a message from the broker.
+    ///
+    /// If a message is received, it converts the [`Message`] object
+    /// to a [`String`] and logs the message details (debug level).
+    ///
+    /// # Returns
+    /// `Option<String>`: Returns the received message as a [`String`] if successful,
+    /// or [`None`] if the broker lock fails or no message is available.
     fn receive_message(&self) -> Option<String> {
         if let Ok(broker) = self.inner.lock() {
             broker.receive_message().map(|msg| {
@@ -81,6 +120,10 @@ impl BrokerWrapper {
         }
     }
 
+    /// Checks if the broker is healthy by attempting to lock the broker.
+    ///
+    /// # Returns
+    /// `bool`: Returns `true` if the broker is healthy, otherwise `false`.
     fn is_healthy(&self) -> bool {
         self.inner.lock().is_ok()
     }
