@@ -8,13 +8,31 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 lazy_static::lazy_static! {
-    static ref BROKER_START_COUNTER: Counter = register_counter!("broker_start_total", "Total number of brokers started").unwrap();
-    static ref BROKER_STOP_COUNTER: Counter = register_counter!("broker_stop_total", "Total number of brokers stopped").unwrap();
-    static ref REQUEST_HISTOGRAM: Histogram = register_histogram!("request_duration_seconds", "Request duration in seconds").unwrap();
+    /// Prometheus [`Counter`] for the total number of brokers started.
+    static ref BROKER_START_COUNTER: Counter = register_counter!(
+        "broker_start_total",
+        "Total number of brokers started"
+    ).unwrap();
+
+    /// Prometheus [`Counter`] for the total number of brokers stopped.
+    static ref BROKER_STOP_COUNTER: Counter = register_counter!(
+        "broker_stop_total",
+        "Total number of brokers stopped"
+    ).unwrap();
+
+    /// Prometheus [`Histogram`] for the request duration in seconds.
+    static ref REQUEST_HISTOGRAM: Histogram = register_histogram!(
+        "request_duration_seconds",
+        "Request duration in seconds"
+    ).unwrap();
+
+    /// Prometheus [`Counter`] for the total number of messages sent.
     static ref MESSAGE_COUNTER: Counter = register_counter!(
         "pilgrimage_messages_total",
         "Total number of messages sent"
     ).unwrap();
+
+    /// Prometheus [`Counter`] for the total number of duplicate messages detected.
     static ref DUPLICATE_MESSAGE_COUNTER: Counter = register_counter!(
         "pilgrimage_duplicate_messages_total",
         "Number of duplicate messages detected"
