@@ -44,8 +44,12 @@
 // These options control how the docs look at a crate level.
 // See https://doc.rust-lang.org/rustdoc/write-documentation/the-doc-attribute.html
 // for more information.
-#![doc(html_logo_url = "https://raw.githubusercontent.com/mila411/pilgrimage/refs/heads/main/.github/images/logo.png")]
-#![doc(html_favicon_url = "https://raw.githubusercontent.com/mila411/pilgrimage/refs/heads/main/.github/images/logo.png")]
+#![doc(
+    html_logo_url = "https://raw.githubusercontent.com/mila411/pilgrimage/refs/heads/main/.github/images/logo.png"
+)]
+#![doc(
+    html_favicon_url = "https://raw.githubusercontent.com/mila411/pilgrimage/refs/heads/main/.github/images/logo.png"
+)]
 
 /// Trigger for CI testing line
 pub mod auth;
