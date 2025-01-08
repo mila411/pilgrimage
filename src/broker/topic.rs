@@ -2,6 +2,7 @@ use crate::broker::error::BrokerError;
 use crate::subscriber::types::Subscriber;
 use std::fmt::{self, Debug};
 
+#[derive(Clone)]
 pub struct Topic {
     pub name: String,
     pub partitions: Vec<Partition>,
@@ -18,6 +19,7 @@ impl Debug for Topic {
     }
 }
 
+#[derive(Clone)]
 pub struct Partition {
     pub id: usize,
     pub messages: Vec<String>,
@@ -35,6 +37,7 @@ impl Debug for Partition {
     }
 }
 
+#[derive(Clone)]
 pub struct Replica {
     pub broker_id: String,
     pub messages: Vec<String>,
@@ -182,6 +185,15 @@ impl Topic {
 }
 
 impl Partition {
+    pub fn new(id: usize) -> Self {
+        Self {
+            id,
+            messages: Vec::new(),
+            replicas: Vec::new(),
+            next_offset: 0,
+        }
+    }
+
     /// Adds a message to the partition.
     ///
     /// # Arguments

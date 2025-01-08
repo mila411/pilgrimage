@@ -26,7 +26,7 @@ fn main() {
     let broker_clone = Arc::clone(&broker);
     let _subscriber = thread::spawn(move || {
         loop {
-            let mut broker = broker_clone.lock().unwrap();
+            let broker = broker_clone.lock().unwrap();
             if let Some(message) = broker.receive_message() {
                 println!("Received: ID={}, Content={}", message.id, message.content);
             }
@@ -36,7 +36,7 @@ fn main() {
 
     // Send a message
     {
-        let mut broker = broker.lock().unwrap();
+        let broker = broker.lock().unwrap();
         let message = Message::new("Hello, world!".to_string());
         println!("Send: ID={}, Content={}", message.id, message.content);
         broker.send_message(message).unwrap();

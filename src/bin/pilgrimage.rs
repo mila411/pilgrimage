@@ -161,39 +161,36 @@ mod tests {
                 "/tmp/storage_broker1.db",
             ]);
 
-        match matches.subcommand() {
-            Some(("start", start_matches)) => {
-                let id = start_matches.value_of("id").unwrap();
-                let partitions: usize = start_matches
-                    .value_of("partitions")
-                    .unwrap()
-                    .parse()
-                    .unwrap();
-                let replication: usize = start_matches
-                    .value_of("replication")
-                    .unwrap()
-                    .parse()
-                    .unwrap();
-                let storage = start_matches.value_of("storage").unwrap();
+        if let Some(("start", start_matches)) = matches.subcommand() {
+            let id = start_matches.value_of("id").unwrap();
+            let partitions: usize = start_matches
+                .value_of("partitions")
+                .unwrap()
+                .parse()
+                .unwrap();
+            let replication: usize = start_matches
+                .value_of("replication")
+                .unwrap()
+                .parse()
+                .unwrap();
+            let storage = start_matches.value_of("storage").unwrap();
 
-                println!(
-                    "Starting broker {} with {} partitions, replication factor of {}, and storage path {}...",
-                    id, partitions, replication, storage
-                );
+            println!(
+                "Starting broker {} with {} partitions, replication factor of {}, and storage path {}...",
+                id, partitions, replication, storage
+            );
 
-                let broker = Broker::new(id, partitions, replication, storage);
-                let broker = Arc::new(Mutex::new(broker));
+            let broker = Broker::new(id, partitions, replication, storage);
+            let broker = Arc::new(Mutex::new(broker));
 
-                let broker_clone = Arc::clone(&broker);
-                thread::spawn(move || {
-                    let _broker = broker_clone.lock().unwrap();
-                    println!("Broker is running...");
-                });
+            let broker_clone = Arc::clone(&broker);
+            thread::spawn(move || {
+                let _broker = broker_clone.lock().unwrap();
+                println!("Broker is running...");
+            });
 
-                thread::sleep(Duration::from_secs(1)); // Simulate some work
-                println!("Broker {} started.", id);
-            }
-            _ => {}
+            thread::sleep(Duration::from_secs(1)); // Simulate some work
+            println!("Broker {} started.", id);
         }
     }
 
@@ -203,12 +200,9 @@ mod tests {
             .subcommand(SubCommand::with_name("stop").arg(Arg::with_name("id").required(true)))
             .get_matches_from(vec!["test", "stop", "broker1"]);
 
-        match matches.subcommand() {
-            Some(("stop", stop_matches)) => {
-                let id = stop_matches.value_of("id").unwrap();
-                println!("Stopping broker {}...", id);
-            }
-            _ => {}
+        if let Some(("stop", stop_matches)) = matches.subcommand() {
+            let id = stop_matches.value_of("id").unwrap();
+            println!("Stopping broker {}...", id);
         }
     }
 }

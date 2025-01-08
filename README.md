@@ -30,7 +30,6 @@ Current Pilgrimage supports **At-least-once**.
 
 When using Pilgramage as a Crate, client authentication is implemented, but at present, authentication is not implemented for message sending and receiving from the CLI and web client. You can find a sample of authentication with Crate `examples/auth-example.rs`, `examples/auth-send-recv.rs`.
 
-
 ## Features
 
 - Topic-based pub/sub model
@@ -73,26 +72,52 @@ When using Pilgramage as a Crate, client authentication is implemented, but at p
 ### Basic usage
 
 ```rust
-use pilgrimage::broker::{Broker, Node};
+use pilgrimage::broker::Broker;
+use pilgrimage::message::message::Message;
+use pilgrimage::schema::registry::SchemaRegistry;
 use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::Duration;
 
 fn main() {
-    // Broker Creation
-    let broker = Broker::new("broker1", 3, 2, "storage_path");
+    // Create a schema registry
+    let schema_registry = SchemaRegistry::new();
+    let schema_def = r#"{"type":"record","name":"test","fields":[{"name":"id","type":"string"}]}"#;
+    schema_registry
+        .register_schema("test_topic", schema_def)
+        .unwrap();
 
-    // Adding a node
-    let node = Node {
-        data: Arc::new(Mutex::new(Vec::new())),
-    };
-    broker.add_node("node1".to_string(), node);
+    // Create a broker
+    let broker = Arc::new(Mutex::new(Broker::new("broker1", 3, 2, "logs")));
+
+    // Create a topic
+    {
+        let mut broker = broker.lock().unwrap();
+        broker.create_topic("test_topic", Some(1)).unwrap();
+    }
+
+    // Create a subscriber
+    let broker_clone = Arc::clone(&broker);
+    let _subscriber = thread::spawn(move || {
+        loop {
+            let broker = broker_clone.lock().unwrap();
+            if let Some(message) = broker.receive_message() {
+                println!("Received: ID={}, Content={}", message.id, message.content);
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
+    });
 
     // Send a message
-    broker.send_message("Hello, world!".to_string());
-
-    // Message received
-    if let Some(message) = broker.receive_message() {
-        println!("Received: {}", message);
+    {
+        let broker = broker.lock().unwrap();
+        let message = Message::new("Hello, world!".to_string());
+        println!("Send: ID={}, Content={}", message.id, message.content);
+        broker.send_message(message).unwrap();
     }
+
+    // Give the remaining messages in the inbox time to process.
+    thread::sleep(Duration::from_secs(1));
 }
 ```
 
@@ -100,86 +125,98 @@ fn main() {
 
 ```rust
 use pilgrimage::broker::Broker;
-use std::sync::Arc;
-use std::thread;
-
-fn main() {
-    let broker = Arc::new(Broker::new("broker1", 3, 2, "storage_path"));
-
-    let broker_sender = Arc::clone(&broker);
-    let sender_handle = thread::spawn(move || {
-        for i in 0..10 {
-            let message = format!("Message {}", i);
-            broker_sender.send_message(message);
-        }
-    });
-
-    let broker_receiver = Arc::clone(&broker);
-    let receiver_handle = thread::spawn(move || {
-        for _ in 0..10 {
-            if let Some(message) = broker_receiver.receive_message() {
-                println!("Received: {:?}", message);
-            }
-        }
-    });
-
-    sender_handle.join().unwrap();
-    receiver_handle.join().unwrap();
-}
-```
-
-### Fault Detection and Automatic Recovery
-
-The system includes mechanisms for fault detection and automatic recovery. Nodes are monitored using heartbeat signals, and if a fault is detected, the system will attempt to recover automatically.
-
-```rust
-use pilgrimage::Broker;
-use std::sync::{Arc, Mutex};
+use pilgrimage::message::message::Message;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+    mpsc,
+};
 use std::thread;
 use std::time::Duration;
 
 fn main() {
-    let storage = Arc::new(Mutex::new(Storage::new("test_db_path").unwrap()));
-    let mut broker = Broker::new("broker_id", 1, 1, "test_db_path");
-    broker.storage = storage.clone();
+    let broker = Arc::new(Broker::new("broker1", 3, 2, "storage_path"));
+    let running = Arc::new(AtomicBool::new(true));
+    let (tx, rx) = mpsc::channel();
 
-    // Simulating a disability
-    {
-        let mut storage_guard = storage.lock().unwrap();
-        storage_guard.available = false;
+    let broker_sender = Arc::clone(&broker);
+    let sender_running = Arc::clone(&running);
+    let sender_handle = thread::spawn(move || {
+        for i in 0..10 {
+            let content = format!("Message {}", i);
+            let message = Message::from(content);
+            println!("Send: ID={}, Content={}", message.id, message.content);
+
+            if let Err(e) = broker_sender.send_message(message) {
+                println!("Transmission error: {}", e);
+                return Err(e);
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
+        sender_running.store(false, Ordering::SeqCst);
+        tx.send(()).unwrap();
+        Ok(())
+    });
+
+    let broker_receiver = Arc::clone(&broker);
+    let receiver_running = Arc::clone(&running);
+    let receiver_handle = thread::spawn(move || {
+        while receiver_running.load(Ordering::SeqCst) {
+            if let Some(message) = broker_receiver.receive_message() {
+                println!("Received: ID={}, Content={}", message.id, message.content);
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
+    });
+
+    // Waiting for transmission to be completed
+    rx.recv().unwrap();
+
+    // Give the remaining messages in the inbox time to process.
+    thread::sleep(Duration::from_secs(1));
+    running.store(false, Ordering::SeqCst);
+
+    if let Err(e) = sender_handle.join() {
+        println!("Transmission thread error: {:?}", e);
     }
-
-    // Simulating a disability
-    broker.monitor_nodes();
-
-    // Simulating a disability
-    thread::sleep(Duration::from_millis(100));
-    let storage_guard = storage.lock().unwrap();
-    assert!(storage_guard.is_available());
+    if let Err(e) = receiver_handle.join() {
+        println!("Received thread error: {:?}", e);
+    }
 }
+
 ```
 
 ### Examples
 
-- Simple message sending and receiving
-- Sending and receiving multiple messages
-- Sending and receiving messages in multiple threads
-- Authentication processing example
-- Sending and receiving messages as an authenticated user
-
 To execute a basic example, use the following command:
 
 ```bash
-cargo run --example simple-send-recv
-cargo run --example mulch-send-recv
-cargo run --example thread-send-recv
+cargo run --example ack-send-recv
 cargo run --example auth-example
 cargo run --example auth-send-recv
+cargo run --example simple-send-recv
+cargo run --example thread-send-recv
+cargo run --example transaction-send-recv
 ```
 
 ### Bench
 
 If the allocated memory is small, it may fail.
+
+```sh
+Gnuplot not found, using plotters backend
+send_message            time:   [849.75 ns 851.33 ns 853.18 ns]
+                        change: [-23.318% -20.131% -18.021%] (p = 0.00 < 0.05)
+                        Performance has improved.
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+
+send_benchmark_message  time:   [850.69 ns 852.08 ns 853.67 ns]
+                        change: [-33.444% -26.669% -22.423%] (p = 0.00 < 0.05)
+                        Performance has improved.
+Found 2 outliers among 100 measurements (2.00%)
+  2 (2.00%) high mild
+```
 
 `cargo bench`
 

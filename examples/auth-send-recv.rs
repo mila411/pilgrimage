@@ -31,7 +31,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         println!("User {} authentication successful", username);
 
         let roles = vec!["admin".to_string()];
-        let token = token_manager.generate_token(username, roles)?;
+        let _token = token_manager.generate_token(username, roles)?;
 
         let broker = Broker::new("broker1", 1, 5, "storage");
         let message = "Secret Message";

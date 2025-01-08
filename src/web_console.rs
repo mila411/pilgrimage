@@ -302,7 +302,7 @@ mod tests {
 
         let req = test::TestRequest::post()
             .uri("/start")
-            .set_json(&json!({
+            .set_json(json!({
                 "id": "broker1",
                 "partitions": 3,
                 "replication": 2,
@@ -331,7 +331,7 @@ mod tests {
         // Start the broker first
         let req = test::TestRequest::post()
             .uri("/start")
-            .set_json(&json!({
+            .set_json(json!({
                 "id": "broker1",
                 "partitions": 3,
                 "replication": 2,
@@ -344,7 +344,7 @@ mod tests {
         // Now stop the broker
         let req = test::TestRequest::post()
             .uri("/stop")
-            .set_json(&json!({
+            .set_json(json!({
                 "id": "broker1"
             }))
             .to_request();
@@ -370,7 +370,7 @@ mod tests {
         // Start the broker first
         let req = test::TestRequest::post()
             .uri("/start")
-            .set_json(&json!({
+            .set_json(json!({
                 "id": "broker1",
                 "partitions": 3,
                 "replication": 2,
@@ -383,7 +383,7 @@ mod tests {
         // Now send a message
         let req = test::TestRequest::post()
             .uri("/send")
-            .set_json(&json!({
+            .set_json(json!({
                 "id": "broker1",
                 "message": "Hello, World!"
             }))
@@ -411,7 +411,7 @@ mod tests {
         // Start the broker first
         let req = test::TestRequest::post()
             .uri("/start")
-            .set_json(&json!({
+            .set_json(json!({
                 "id": "broker1",
                 "partitions": 3,
                 "replication": 2,
@@ -424,7 +424,7 @@ mod tests {
         // Send a message
         let req = test::TestRequest::post()
             .uri("/send")
-            .set_json(&json!({
+            .set_json(json!({
                 "id": "broker1",
                 "message": "Hello, World!"
             }))
@@ -435,7 +435,7 @@ mod tests {
         // Now consume the message
         let req = test::TestRequest::post()
             .uri("/consume")
-            .set_json(&json!({
+            .set_json(json!({
                 "id": "broker1"
             }))
             .to_request();
@@ -461,7 +461,7 @@ mod tests {
         // Start the broker first
         let req = test::TestRequest::post()
             .uri("/start")
-            .set_json(&json!({
+            .set_json(json!({
                 "id": "broker1",
                 "partitions": 3,
                 "replication": 2,
@@ -474,7 +474,7 @@ mod tests {
         // Now check the broker status
         let req = test::TestRequest::post()
             .uri("/status")
-            .set_json(&json!({
+            .set_json(json!({
                 "id": "broker1"
             }))
             .to_request();
@@ -499,7 +499,7 @@ mod tests {
         // Start the broker first
         let req = test::TestRequest::post()
             .uri("/start")
-            .set_json(&json!({
+            .set_json(json!({
                 "id": "broker1",
                 "partitions": 3,
                 "replication": 2,
@@ -512,7 +512,7 @@ mod tests {
         // Try to start the same broker again
         let req = test::TestRequest::post()
             .uri("/start")
-            .set_json(&json!({
+            .set_json(json!({
                 "id": "broker1",
                 "partitions": 3,
                 "replication": 2,
@@ -540,7 +540,7 @@ mod tests {
         // Try to stop a broker that is not running
         let req = test::TestRequest::post()
             .uri("/stop")
-            .set_json(&json!({
+            .set_json(json!({
                 "id": "broker1"
             }))
             .to_request();
@@ -565,7 +565,7 @@ mod tests {
         // Try to send a message to a broker that is not running
         let req = test::TestRequest::post()
             .uri("/send")
-            .set_json(&json!({
+            .set_json(json!({
                 "id": "broker1",
                 "message": "Hello, World!"
             }))
@@ -591,7 +591,7 @@ mod tests {
         // Try to consume messages from a broker that is not running
         let req = test::TestRequest::post()
             .uri("/consume")
-            .set_json(&json!({
+            .set_json(json!({
                 "id": "broker1"
             }))
             .to_request();
@@ -616,7 +616,7 @@ mod tests {
         // Try to check the status of a broker that is not running
         let req = test::TestRequest::post()
             .uri("/status")
-            .set_json(&json!({
+            .set_json(json!({
                 "id": "broker1"
             }))
             .to_request();
