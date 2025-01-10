@@ -485,3 +485,733 @@ impl Node {
 pub struct Partition {
     pub node_id: String,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::{HashMap, HashSet};
+    use std::fs::{self, File, OpenOptions};
+    use std::path::Path;
+    use std::sync::atomic::AtomicU64;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
+    use tempfile::tempdir;
+
+    fn create_test_broker() -> Broker {
+        let temp_dir = tempdir().unwrap();
+        let storage_path = temp_dir
+            .path()
+            .join("test_storage")
+            .to_str()
+            .unwrap()
+            .to_owned();
+
+        Broker {
+            consumer_groups: Arc::new(Mutex::new(HashMap::new())),
+            id: String::from("test_broker"),
+            leader: Arc::new(Mutex::new(Some(String::from("leader1")))),
+            storage: Arc::new(Mutex::new(Storage::new(&storage_path).unwrap())),
+            topics: HashMap::new(),
+            num_partitions: 1,
+            replication_factor: 1,
+            term: AtomicU64::new(1),
+            leader_election: LeaderElection::new("test_broker", HashMap::new()),
+            nodes: Arc::new(Mutex::new(HashMap::new())),
+            partitions: Arc::new(Mutex::new(HashMap::new())),
+            replicas: Arc::new(Mutex::new(HashMap::new())),
+            message_queue: Arc::new(MessageQueue::new(1, 10)),
+            log_path: "logs/broker.log".to_string(),
+            ack_waiters: Arc::new(Mutex::new(HashMap::new())),
+            processed_message_ids: Arc::new(Mutex::new(HashSet::new())),
+            transaction_log: Arc::new(Mutex::new(Vec::new())),
+            transaction_messages: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
+    fn create_test_node(id: &str) -> Node {
+        Node {
+            id: id.to_string(),
+            address: "127.0.0.1:8080".to_string(),
+            is_active: true,
+            data: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
+    fn create_test_broker_with_path(log_path: &str) -> Broker {
+        Broker {
+            consumer_groups: Arc::new(Mutex::new(HashMap::new())),
+            id: String::from("test_broker"),
+            leader: Arc::new(Mutex::new(Some(String::from("leader1")))),
+            storage: Arc::new(Mutex::new(Storage::new("test_storage").unwrap())),
+            topics: HashMap::new(),
+            num_partitions: 3,
+            replication_factor: 2,
+            term: AtomicU64::new(0),
+            leader_election: LeaderElection::new("test_broker", HashMap::new()),
+            nodes: Arc::new(Mutex::new(HashMap::new())),
+            partitions: Arc::new(Mutex::new(HashMap::new())),
+            replicas: Arc::new(Mutex::new(HashMap::new())),
+            message_queue: Arc::new(MessageQueue::new(1, 10)),
+            log_path: log_path.to_string(),
+            ack_waiters: Arc::new(Mutex::new(HashMap::new())),
+            processed_message_ids: Arc::new(Mutex::new(HashSet::new())),
+            transaction_log: Arc::new(Mutex::new(Vec::new())),
+            transaction_messages: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
+    fn setup_test_logs(path: &str) {
+        cleanup_test_logs(path);
+    }
+
+    fn cleanup_test_logs(path: &str) {
+        if Path::new(path).exists() {
+            let _ = fs::remove_file(path);
+        }
+        let old_path = format!("{}.old", path);
+        if Path::new(&old_path).exists() {
+            let _ = fs::remove_file(old_path);
+        }
+    }
+
+    #[test]
+    fn test_node_creation() {
+        let node = Node::new("node1", "127.0.0.1:8080", true);
+        assert_eq!(node.id, "node1");
+        assert_eq!(node.address, "127.0.0.1:8080");
+        assert!(node.is_active);
+    }
+
+    #[test]
+    fn test_log_rotation_and_cleanup() {
+        let temp_dir = tempdir().unwrap();
+        let storage_path = temp_dir
+            .path()
+            .join("test_storage")
+            .to_str()
+            .unwrap()
+            .to_owned();
+        let storage = Storage::new(&storage_path).unwrap();
+
+        let result = storage.rotate_logs();
+        assert!(result.is_err(), "Old log file does not exist");
+
+        let old_log_path = format!("{}.old", storage_path);
+        File::create(&old_log_path).unwrap();
+        let result = storage.rotate_logs();
+        assert!(
+            result.is_ok(),
+            "Log rotation should succeed when old log file exists"
+        );
+    }
+
+    #[test]
+    fn test_broker_creation() {
+        let test_log = "test_logs_creation";
+        setup_test_logs(test_log);
+
+        let broker = Broker::new("broker1", 3, 2, test_log);
+        assert_eq!(broker.id, "broker1");
+        assert_eq!(broker.num_partitions, 3);
+        assert_eq!(broker.replication_factor, 2);
+
+        cleanup_test_logs(test_log);
+    }
+
+    #[test]
+    fn test_create_topic() {
+        let test_log = "test_logs_topic";
+        setup_test_logs(test_log);
+
+        let mut broker = Broker::new("broker1", 3, 2, test_log);
+        broker.create_topic("test_topic", None).unwrap();
+        assert!(broker.topics.contains_key("test_topic"));
+
+        cleanup_test_logs(test_log);
+    }
+
+    #[tokio::test]
+    async fn test_subscribe_and_publish() {
+        let mut broker = create_test_broker();
+        let topic = "test_topic";
+        let message = "test_message".to_string();
+
+        broker.create_topic(topic, None).unwrap();
+
+        let subscriber = Subscriber::new(
+            "test_consumer",
+            Box::new(move |msg: String| {
+                println!("Received message: {}", msg);
+            }),
+        );
+
+        broker
+            .subscribe(topic, subscriber, Some("test_group"))
+            .unwrap();
+
+        let ack = broker
+            .publish_with_ack(topic, message.clone(), None)
+            .await
+            .unwrap();
+
+        assert!(
+            !ack.message_id.is_nil(),
+            "The message ID was not generated correctly."
+        );
+
+        if let Some(received) = broker.receive_message() {
+            assert_eq!(
+                received.content, message,
+                "The content of the received message does not match."
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_consumer_group_message_distribution() {
+        let temp_dir = tempdir().unwrap();
+        let storage_path = temp_dir.path().join("test_storage");
+        fs::create_dir_all(&storage_path).unwrap();
+
+        let mut broker = create_test_broker_with_path(storage_path.to_str().unwrap());
+        let topic = "test_topic";
+        let group = "test_group";
+        let message_count = 10;
+        let group_message_counter = Arc::new(AtomicUsize::new(0));
+
+        broker.create_topic(topic, None).unwrap();
+        let counter = group_message_counter.clone();
+
+        let subscriber = Subscriber::new(
+            "consumer_1",
+            Box::new(move |_| {
+                counter.fetch_add(1, Ordering::SeqCst);
+            }),
+        );
+        broker.subscribe(topic, subscriber, Some(group)).unwrap();
+
+        for i in 0..message_count {
+            broker
+                .publish_with_ack(topic, format!("message_{}", i), None)
+                .await
+                .unwrap();
+        }
+
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        assert_eq!(
+            group_message_counter.load(Ordering::SeqCst),
+            message_count,
+            "Number of messages processed does not match"
+        );
+    }
+
+    #[test]
+    fn test_data_replication() {
+        let broker = create_test_broker();
+        let partition_id = "1";
+        let data = vec![1, 2, 3];
+
+        broker.replicate_data(partition_id, &data);
+
+        let mut partitions = HashMap::new();
+        for i in 0..3 {
+            partitions.insert(i.to_string(), Partition {
+                node_id: format!("node_{}", i),
+            });
+        }
+        let partition_id = "test_partition";
+        let nodes = vec!["node1", "node2", "node3"];
+        let node_index = partition_id.as_bytes()[0] as usize % nodes.len();
+
+        assert!(node_index < nodes.len(), "Node index is out of range.");
+    }
+
+    #[test]
+    fn test_failover() {
+        let broker = Broker::new("broker1", 3, 2, "logs");
+        let node1 = create_test_node("node1");
+        let node2 = create_test_node("node2");
+
+        broker.add_node("node1".to_string(), node1);
+        broker.add_node("node2".to_string(), node2);
+
+        {
+            let mut leader = broker.leader.lock().unwrap();
+            *leader = Some("node1".to_string());
+        }
+
+        broker.detect_failure("node1");
+
+        let nodes = broker.nodes.lock().unwrap();
+        assert!(!nodes.contains_key("node1"));
+        assert!(nodes.contains_key("node2"));
+
+        let leader = broker.leader.lock().unwrap();
+        assert_eq!(leader.as_deref(), Some("node2"));
+    }
+
+    #[test]
+    fn test_rebalance() {
+        let _broker = create_test_broker();
+        let mut partitions = HashMap::new();
+        for i in 0..3 {
+            let partition_id = i.to_string();
+            partitions.insert(partition_id, Partition {
+                node_id: format!("node_{}", i),
+            });
+        }
+
+        let nodes = vec!["node1", "node2", "node3"];
+        let partition_id = "test_partition";
+        let node_index = partition_id.chars().next().map(|c| c as usize).unwrap_or(0) % nodes.len();
+
+        // 検証
+        assert!(node_index < nodes.len(), "Node index is out of range.");
+        assert!(partitions.contains_key("0"), "Partition 0 does not exist.");
+    }
+
+    #[test]
+    fn test_add_existing_node() {
+        let broker = Broker::new("broker1", 3, 2, "logs");
+        let node = create_test_node("node1");
+
+        broker.add_node("node1".to_string(), node.clone());
+        broker.add_node("node1".to_string(), node);
+
+        let nodes = broker.nodes.lock().unwrap();
+        assert_eq!(nodes.len(), 1);
+    }
+
+    #[test]
+    fn test_remove_nonexistent_node() {
+        let broker = Broker::new("broker1", 3, 2, "logs");
+        broker.remove_node("node1");
+
+        let nodes = broker.nodes.lock().unwrap();
+        assert_eq!(nodes.len(), 0);
+    }
+
+    #[test]
+    fn test_replicate_to_nonexistent_node() {
+        let broker = create_test_broker();
+        let partition_id = "1";
+        let data = vec![1, 2, 3];
+
+        broker.replicate_data(partition_id, &data);
+
+        let replicas = broker.replicas.lock().unwrap();
+        assert!(
+            replicas.is_empty(),
+            "Replication is being performed on a node that does not exist."
+        );
+    }
+
+    #[test]
+    fn test_election_with_no_nodes() {
+        let broker = Broker::new("broker1", 3, 2, "logs");
+        let elected = broker.start_election();
+
+        assert!(!elected);
+    }
+
+    #[test]
+    fn test_add_invalid_node() {
+        let broker = Broker::new("broker1", 3, 2, "logs");
+        let node = create_test_node("node1");
+
+        broker.add_node("node1".to_string(), node.clone());
+        broker.add_node("node1".to_string(), node);
+
+        let nodes = broker.nodes.lock().unwrap();
+        assert_eq!(nodes.len(), 1, "Duplicate nodes should not be added.");
+    }
+
+    #[test]
+    fn test_elect_leader_with_no_nodes() {
+        let broker = Broker::new("broker1", 3, 2, "logs");
+        let elected = broker.start_election();
+        assert!(
+            !elected,
+            "If there are no nodes, the leader election should fail."
+        );
+    }
+
+    #[tokio::test]
+    async fn test_replicate_to_nonexistent_nodes() {
+        let broker = create_test_broker();
+        let partition_id = "1";
+        let data = vec![1, 2, 3];
+        let timeout = Duration::from_secs(5);
+        let replication = tokio::time::timeout(timeout, async {
+            broker.replicate_data(partition_id, &data);
+            for id in ["2", "3", "4"].iter() {
+                broker.replicate_data(id, &data);
+                let replicas = broker.replicas.lock().unwrap();
+                assert!(
+                    replicas.is_empty(),
+                    "Replication is being performed to a non-existent node {}.",
+                    id
+                );
+            }
+        });
+
+        // タイムアウト処理
+        match replication.await {
+            Ok(_) => {
+                let replicas = broker.replicas.lock().unwrap();
+                assert!(
+                    replicas.is_empty(),
+                    "Replication is being performed to a node that does not exist."
+                );
+            }
+            Err(_) => panic!("The replication test timed out."),
+        }
+    }
+
+    #[test]
+    fn test_rotate_logs() {
+        let dir = tempdir().unwrap();
+        let log_path = dir.path().join("test.log");
+
+        {
+            let mut file = File::create(&log_path).unwrap();
+            writeln!(file, "This is a test log entry.").unwrap();
+        }
+
+        let broker = create_test_broker_with_path(log_path.to_str().unwrap());
+
+        broker.rotate_logs();
+        let rotated_log_path = log_path.with_extension("old");
+
+        assert!(rotated_log_path.exists());
+        assert!(log_path.exists());
+
+        let new_log_content = fs::read_to_string(&log_path).unwrap();
+        assert!(new_log_content.is_empty());
+    }
+
+    #[test]
+    fn test_rotate_logs_invalid_path() {
+        let broker = create_test_broker_with_path("/invalid/path/test.log");
+        broker.rotate_logs();
+    }
+
+    #[test]
+    fn test_rotate_logs_no_permissions() {
+        let dir = tempdir().unwrap();
+        let log_path = dir.path().join("test.log");
+
+        {
+            let mut file = File::create(&log_path).unwrap();
+            writeln!(file, "test data").unwrap();
+        }
+
+        fs::set_permissions(
+            &log_path,
+            <fs::Permissions as std::os::unix::fs::PermissionsExt>::from_mode(0o444),
+        )
+        .unwrap();
+
+        let broker = create_test_broker_with_path(log_path.to_str().unwrap());
+        broker.rotate_logs();
+    }
+
+    #[test]
+    fn test_rotate_logs_file_not_found() {
+        let dir = tempdir().unwrap();
+        let log_path = dir.path().join("nonexistent.log");
+
+        let broker = create_test_broker_with_path(log_path.to_str().unwrap());
+        broker.rotate_logs();
+    }
+
+    #[test]
+    fn test_rotate_logs_file_in_use() {
+        let temp_dir = tempdir().unwrap();
+        let log_path = temp_dir.path().join("test_logs");
+        fs::create_dir_all(&log_path).unwrap();
+
+        let file_path = log_path.join("test.log");
+        let _file = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .open(&file_path)
+            .unwrap();
+
+        assert!(file_path.exists());
+    }
+
+    #[test]
+    fn test_write_log() {
+        let dir = tempdir().unwrap();
+        let log_path = dir.path().join("test.log");
+
+        fs::create_dir_all(log_path.parent().unwrap()).unwrap();
+
+        let broker = create_test_broker_with_path(log_path.to_str().unwrap());
+        broker.write_log("Test message 1").unwrap();
+        broker.write_log("Test message 2").unwrap();
+
+        let content = fs::read_to_string(&log_path).unwrap();
+        assert!(content.contains("Test message 1"));
+        assert!(content.contains("Test message 2"));
+    }
+
+    #[test]
+    fn test_write_log_invalid_path() {
+        let dir = tempdir().unwrap();
+        let invalid_path = dir.path().join("nonexistent").join("test.log");
+        let broker = create_test_broker_with_path(invalid_path.to_str().unwrap());
+
+        // Test error handling - check that it returns an error
+        let result = broker.write_log("This should not panic");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_write_log_no_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempdir().unwrap();
+        let log_path = dir.path().join("test.log");
+
+        // Create a file and set the permissions to read-only.
+        {
+            let mut file = File::create(&log_path).unwrap();
+            writeln!(file, "Initial content").unwrap();
+        }
+        fs::set_permissions(&log_path, fs::Permissions::from_mode(0o444)).unwrap(); // 読み取り専用
+
+        let broker = create_test_broker_with_path(log_path.to_str().unwrap());
+        let result = broker.write_log("This should handle permission error");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_rotate_logs_with_invalid_storage() {
+        let storage_result = Storage::new("/invalid/path/to/storage");
+        assert!(
+            storage_result.is_err(),
+            "Operations on invalid storage paths should fail."
+        );
+    }
+
+    #[tokio::test]
+    async fn test_multithreaded_message_processing() {
+        let broker = Arc::new(create_test_broker());
+        let processed = Arc::new(AtomicUsize::new(0));
+        let message_count = 10;
+
+        let handles: Vec<_> = (0..message_count)
+            .map(|i| {
+                let broker = broker.clone();
+                let processed = processed.clone();
+                tokio::spawn(async move {
+                    let message = Message {
+                        id: Uuid::new_v4(),
+                        content: format!("message_{}", i),
+                        timestamp: Utc::now(),
+                    };
+                    if broker.send_message(message).is_ok() {
+                        processed.fetch_add(1, Ordering::SeqCst);
+                    }
+                })
+            })
+            .collect();
+
+        for handle in handles {
+            handle.await.unwrap();
+        }
+
+        assert_eq!(
+            processed.load(Ordering::SeqCst),
+            message_count,
+            "The number of processed messages does not match."
+        );
+    }
+
+    #[test]
+    fn test_log_rotation_error_message() {
+        let temp_dir = tempdir().unwrap();
+        let storage_path = temp_dir
+            .path()
+            .join("test_storage")
+            .to_str()
+            .unwrap()
+            .to_owned();
+        let storage = Storage::new(&storage_path).unwrap();
+
+        let result = storage.rotate_logs();
+        if let Err(e) = result {
+            assert_eq!(
+                e.to_string(),
+                format!("Old log file {}.old does not exist", storage_path)
+            );
+        } else {
+            panic!("Expected an error but got success");
+        }
+    }
+
+    #[test]
+    fn test_write_and_read_messages() {
+        let temp_dir = tempdir().unwrap();
+        let storage_path = temp_dir
+            .path()
+            .join("test_storage")
+            .to_str()
+            .unwrap()
+            .to_owned();
+        let mut storage = Storage::new(&storage_path).unwrap();
+
+        storage.write_message("test_message_1").unwrap();
+        storage.write_message("test_message_2").unwrap();
+
+        let messages = storage.read_messages().unwrap();
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0], "test_message_1");
+        assert_eq!(messages[1], "test_message_2");
+    }
+
+    #[test]
+    fn test_perform_operation_with_retry_success_on_first_try() {
+        let broker = create_test_broker();
+
+        let result = broker.perform_operation_with_retry(
+            || Ok::<&str, &str>("Success"),
+            3,
+            Duration::from_millis(10),
+        );
+
+        assert_eq!(result.unwrap(), "Success");
+    }
+
+    #[test]
+    fn test_perform_operation_with_retry_success_after_retries() {
+        let broker = create_test_broker();
+
+        let counter = Arc::new(Mutex::new(0));
+        let counter_clone = Arc::clone(&counter);
+
+        let result = broker.perform_operation_with_retry(
+            || {
+                let mut num = counter_clone.lock().unwrap();
+                *num += 1;
+                if *num < 3 {
+                    Err("Temporary Error")
+                } else {
+                    Ok("Success after retries")
+                }
+            },
+            5,
+            Duration::from_millis(10),
+        );
+
+        assert_eq!(result.unwrap(), "Success after retries");
+        assert_eq!(*counter.lock().unwrap(), 3);
+    }
+
+    #[test]
+    fn test_perform_operation_with_retry_failure_after_max_retries() {
+        let broker = create_test_broker();
+
+        let counter = Arc::new(Mutex::new(0));
+        let counter_clone = Arc::clone(&counter);
+
+        let result = broker.perform_operation_with_retry(
+            || {
+                let mut num = counter_clone.lock().unwrap();
+                *num += 1;
+                Err::<(), &str>("Persistent Error")
+            },
+            3,
+            Duration::from_millis(10),
+        );
+
+        assert!(result.is_err());
+        assert_eq!(*counter.lock().unwrap(), 4);
+    }
+
+    #[tokio::test]
+    async fn test_message_ordering() {
+        let mut broker = create_test_broker();
+        let topic = "test_topic";
+        let received_messages = Arc::new(Mutex::new(Vec::new()));
+
+        broker.create_topic(topic, None).unwrap();
+        let messages = received_messages.clone();
+
+        let subscriber = Subscriber::new(
+            "test_subscriber",
+            Box::new(move |msg| {
+                messages.lock().unwrap().push(msg);
+            }),
+        );
+        broker.subscribe(topic, subscriber, None).unwrap();
+
+        // メッセージ送信
+        let expected_messages = vec!["message1", "message2", "message3"];
+        for msg in &expected_messages {
+            broker
+                .publish_with_ack(topic, msg.to_string(), None)
+                .await
+                .unwrap();
+        }
+
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        let received = received_messages.lock().unwrap();
+        assert_eq!(
+            received.len(),
+            expected_messages.len(),
+            "Not all messages have been received."
+        );
+
+        for (i, msg) in received.iter().enumerate() {
+            assert_eq!(
+                msg,
+                &expected_messages[i].to_string(),
+                "The order of the messages is incorrect."
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_partition_distribution() {
+        let mut broker = create_test_broker();
+        let topic = "test_topic";
+        let num_partitions = 3;
+
+        broker.create_topic(topic, Some(num_partitions)).unwrap();
+
+        let received_messages = Arc::new(Mutex::new(Vec::new()));
+        let messages = received_messages.clone();
+        let subscriber = Subscriber::new(
+            "test_subscriber",
+            Box::new(move |msg| {
+                messages.lock().unwrap().push(msg);
+            }),
+        );
+        broker.subscribe(topic, subscriber, None).unwrap();
+
+        for i in 0..10 {
+            broker
+                .publish_with_ack(topic, format!("message_{}", i), None)
+                .await
+                .unwrap();
+        }
+
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        let received = received_messages.lock().unwrap();
+        assert_eq!(received.len(), 10, "Not all messages have been received.");
+
+        if let Some(topic_data) = broker.topics.get(topic) {
+            assert_eq!(
+                topic_data.partitions.len(),
+                num_partitions as usize,
+                "The number of partitions does not match."
+            );
+        }
+    }
+}

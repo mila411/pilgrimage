@@ -8,6 +8,7 @@ note.txt
 storage_path
 test_*
 test_db_path
+processed_messages.json
 
 ### RustRover ###
 # Generated automatically

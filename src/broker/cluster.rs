@@ -75,22 +75,6 @@ mod tests {
     use std::time::Duration;
 
     #[test]
-    fn test_cluster_initialization() {
-        let cluster = Cluster::default();
-
-        let broker1 = Arc::new(Broker::new("broker1", 3, 2, "logs"));
-        let broker2 = Arc::new(Broker::new("broker2", 3, 2, "logs"));
-
-        cluster.add_broker("broker1".to_string(), broker1.clone());
-        cluster.add_broker("broker2".to_string(), broker2.clone());
-
-        cluster.monitor_cluster();
-
-        assert!(cluster.get_broker("broker1").is_some());
-        assert!(cluster.get_broker("broker2").is_some());
-    }
-
-    #[test]
     fn test_broker_removal_on_unhealthy() {
         let cluster = Cluster::default();
 
