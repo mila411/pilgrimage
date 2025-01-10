@@ -134,19 +134,17 @@ impl BrokerWrapper {
 /// This structure contains a (hash) map of broker IDs to [`BrokerWrapper`] instances.
 /// It also implements the [`Clone`] trait to allow cloning of the state (deep copy).
 ///
-/// # Example
+/// # Examples
 /// ```
 /// use std::{
 ///     collections::HashMap,
 ///     sync::{Arc, Mutex},
 /// };
 ///
-/// fn main() {
-///     // Create a new AppState instance
-///     let state = AppState {
-///         brokers: Arc::new(Mutex::new(HashMap::new())),
-///     };
-/// }
+/// // Create a new AppState instance
+/// let state = AppState {
+///     brokers: Arc::new(Mutex::new(HashMap::new()))
+/// };
 /// ```
 ///
 /// # See also
@@ -162,6 +160,13 @@ pub struct AppState {
     brokers: Arc<Mutex<HashMap<String, BrokerWrapper>>>,
 }
 
+/// Deserializable structure for starting a new broker.
+///
+/// # Fields
+/// * `id` - Unique identifier for the broker.
+/// * `partitions` - Number of partitions for the broker.
+/// * `replication` - Replication factor for the broker.
+/// * `storage` - Storage path for the broker.
 #[derive(Deserialize)]
 struct StartRequest {
     id: String,
@@ -170,27 +175,54 @@ struct StartRequest {
     storage: String,
 }
 
+/// Deserializable structure for stopping a broker.
+///
+/// # Fields
+/// * `id` - Unique identifier for the broker.
 #[derive(Deserialize)]
 struct StopRequest {
     id: String,
 }
 
+/// Deserializable structure for sending a message to a broker.
+///
+/// # Fields
+/// * `id` - Unique identifier for the broker.
+/// * `message` - Message to be sent to the broker.
 #[derive(Deserialize)]
 struct SendRequest {
     id: String,
     message: String,
 }
 
+/// Deserializable structure for consuming messages from a broker.
+///
+/// # Fields
+/// * `id` - Unique identifier for the broker.
 #[derive(Deserialize)]
 struct ConsumeRequest {
     id: String,
 }
 
+/// Deserializable structure for checking the status of a broker.
+///
+/// # Fields
+/// * `id` - Unique identifier for the broker.
 #[derive(Deserialize)]
 struct StatusRequest {
     id: String,
 }
 
+/// Starts a new broker with the given information.
+///
+/// # Arguments
+/// * `info` - A [`StartRequest`] instance containing the broker details.
+/// * `data` - Application state ([`AppState`]) containing the brokers map.
+///
+/// # Returns
+/// An [`HttpResponse`] indicating the success or failure of the operation:
+/// * [`actix_web::http::StatusCode::OK`] if the broker was started successfully.
+/// * [`actix_web::http::StatusCode::BAD_REQUEST`] if the broker is already running.
 async fn start_broker(info: web::Json<StartRequest>, data: web::Data<AppState>) -> impl Responder {
     let timer = REQUEST_HISTOGRAM.start_timer();
     let mut brokers_lock = data.brokers.lock().unwrap();
@@ -217,6 +249,16 @@ async fn start_broker(info: web::Json<StartRequest>, data: web::Data<AppState>) 
     HttpResponse::Ok().json("Broker started")
 }
 
+/// Stops the broker with the given ID.
+///
+/// # Arguments
+/// * `info` - A [`StopRequest`] instance containing the broker ID.
+/// * `data` - Application state ([`AppState`]) containing the brokers map.
+///
+/// # Returns
+/// An [`HttpResponse`] indicating the success or failure of the operation:
+/// * [`actix_web::http::StatusCode::OK`] if the broker was stopped successfully.
+/// * [`actix_web::http::StatusCode::BAD_REQUEST`] if no broker is running with the given ID.
 async fn stop_broker(info: web::Json<StopRequest>, data: web::Data<AppState>) -> impl Responder {
     let timer = REQUEST_HISTOGRAM.start_timer();
     let mut brokers_lock = data.brokers.lock().unwrap();
@@ -231,6 +273,16 @@ async fn stop_broker(info: web::Json<StopRequest>, data: web::Data<AppState>) ->
     }
 }
 
+/// Sends a message to the broker with the given ID.
+///
+/// # Arguments
+/// * `info` - A [`SendRequest`] instance containing the broker ID and message.
+/// * `data` - Application state ([`AppState`]) containing the brokers map.
+///
+/// # Returns
+/// An [`HttpResponse`] indicating the success or failure of the operation:
+/// * [`actix_web::http::StatusCode::OK`] if the message was sent successfully.
+/// * [`actix_web::http::StatusCode::BAD_REQUEST`] if no broker is running with the given ID.
 async fn send_message(info: web::Json<SendRequest>, data: web::Data<AppState>) -> impl Responder {
     let timer = REQUEST_HISTOGRAM.start_timer();
     let brokers_lock = data.brokers.lock().unwrap();
@@ -245,6 +297,16 @@ async fn send_message(info: web::Json<SendRequest>, data: web::Data<AppState>) -
     }
 }
 
+/// Consumes a message from the broker with the given ID.
+///
+/// # Arguments
+/// * `info` - A [`ConsumeRequest`] instance containing the broker ID.
+/// * `data` - Application state ([`AppState`]) containing the brokers map.
+///
+/// # Returns
+/// An [`HttpResponse`] indicating the success or failure of the operation:
+/// * [`actix_web::http::StatusCode::OK`] if a message was consumed successfully or no messages are available.
+/// * [`actix_web::http::StatusCode::BAD_REQUEST`] if no broker is running with the given ID.
 async fn consume_messages(
     info: web::Json<ConsumeRequest>,
     data: web::Data<AppState>,
@@ -266,6 +328,16 @@ async fn consume_messages(
     }
 }
 
+/// Checks the status of the broker with the given ID.
+///
+/// # Arguments
+/// * `info` - A [`StatusRequest`] instance containing the broker ID.
+/// * `data` - Application state ([`AppState`]) containing the brokers map.
+///
+/// # Returns
+/// An [`HttpResponse`] indicating the status of the broker:
+/// * [`actix_web::http::StatusCode::OK`] if the broker is healthy.
+/// * [`actix_web::http::StatusCode::BAD_REQUEST`] if no broker is running with the given ID.
 async fn broker_status(
     info: web::Json<StatusRequest>,
     data: web::Data<AppState>,
@@ -282,6 +354,10 @@ async fn broker_status(
     }
 }
 
+/// Exposes the Prometheus metrics for the application.
+///
+/// # Returns
+/// An [`HttpResponse`] containing the Prometheus metrics as a string in the body.
 async fn metrics() -> impl Responder {
     let encoder = TextEncoder::new();
     let metric_families = prometheus::gather();
@@ -300,7 +376,7 @@ async fn metrics() -> impl Responder {
 /// # Returns
 /// `std::io::Result<()>` indicating the success or failure of the server execution.
 ///
-/// # Example
+/// # Examples
 /// ```
 /// #[tokio::main]
 /// async fn main() -> std::io::Result<()> {
