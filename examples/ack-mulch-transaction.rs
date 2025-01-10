@@ -29,7 +29,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 format!("consumer{}", i % 3 + 1),
                 0,
             );
-            println!("ACK発行: {:?}", ack);
+            println!("ACK issued: {:?}", ack);
         });
         handles.push(handle);
     }
