@@ -1,10 +1,9 @@
-//! #[allow(clippy::needless_doctest_main)]
 //! [![github]](https://github.com/mila411/pilgrimage)&ensp;
 //! [![crates-io]](https://crates.io/crates/pilgrimage)&ensp;
 //! [![docs-rs]](https://docs.rs/pilgrimage/latest/pilgrimage/)
 //!
-//! [github]: https://img.shields.io/badge/GitHub-%23000000?style=for-the-badge&logo=github
-//! [crates-io]: https://img.shields.io/crates/v/pilgrimage?style=for-the-badge&logo=rust
+//! [github]: https://img.shields.io/badge/github-black?style=for-the-badge&logo=github&labelColor=555555
+//! [crates-io]: https://img.shields.io/badge/crates.io-fc8d62?style=for-the-badge&logo=rust&labelColor=555555
 //! [docs-rs]: https://img.shields.io/badge/docs.rs-66c2a5?style=for-the-badge&logo=docs.rs&labelColor=555555
 //!
 //! # pilgrimage
