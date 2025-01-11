@@ -1,11 +1,9 @@
 use chrono::{DateTime, Utc};
-use pilgrimage::message::message::Message;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     fs::{File, OpenOptions},
     io::{BufReader, BufWriter},
-    time::Duration,
 };
 use tokio::time::sleep;
 use uuid::Uuid;
@@ -30,55 +28,61 @@ struct ProcessedState {
 }
 
 impl ProcessedState {
-    fn new() -> Self {
-        Self {
-            processed_messages: HashMap::new(),
-        }
-    }
-
     fn load(path: &str) -> Self {
-        File::open(path)
-            .ok()
-            .and_then(|f| {
-                let reader = BufReader::new(f);
-                serde_json::from_reader(reader).ok()
-            })
-            .unwrap_or_else(Self::new)
+        let file = OpenOptions::new()
+            .read(true)
+            .open(path)
+            .unwrap_or_else(|_| File::create(path).unwrap());
+        let reader = BufReader::new(file);
+        serde_json::from_reader(reader).unwrap_or_else(|_| ProcessedState {
+            processed_messages: HashMap::new(),
+        })
     }
 
-    fn save(&self, path: &str) -> std::io::Result<()> {
+    fn save(&self, path: &str) {
         let file = OpenOptions::new()
-            .create(true)
             .write(true)
             .truncate(true)
-            .open(path)?;
+            .open(path)
+            .unwrap();
         let writer = BufWriter::new(file);
-        serde_json::to_writer_pretty(writer, self)?;
-        Ok(())
+        serde_json::to_writer(writer, self).unwrap();
     }
 
-    // Set the argument to &Uuid and convert it to a String internally
     fn is_processed(&self, message_id: &Uuid) -> bool {
-        let key = message_id.to_string();
         self.processed_messages
-            .get(&key)
-            .map(|state| matches!(state.status, ProcessingStatus::Completed))
-            .unwrap_or(false)
+            .contains_key(&message_id.to_string())
     }
 
     fn mark_processing(&mut self, message_id: Uuid, consumer_id: String) {
         let key = message_id.to_string();
-        self.processed_messages.insert(key, MessageProcessingState {
+        let state = MessageProcessingState {
             processed_at: Utc::now(),
             consumer_id,
             status: ProcessingStatus::Processing,
-        });
+        };
+        self.processed_messages.insert(key, state);
     }
 
     fn mark_completed(&mut self, message_id: Uuid) {
         let key = message_id.to_string();
         if let Some(state) = self.processed_messages.get_mut(&key) {
             state.status = ProcessingStatus::Completed;
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct Message {
+    id: Uuid,
+    content: String,
+}
+
+impl Message {
+    fn new(content: String) -> Self {
+        Message {
+            id: Uuid::new_v4(),
+            content,
         }
     }
 }
@@ -106,14 +110,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let msg_clone = message.clone();
         let handle = tokio::spawn(async move {
-            sleep(Duration::from_millis(500 * (i + 1) as u64)).await;
-            msg_clone.id
+            // Simulate message processing
+            sleep(std::time::Duration::from_secs(1)).await;
+            println!("ACK: Received for ID={}", msg_clone.id);
         });
 
-        let processed_id = handle.await?;
-        state.mark_completed(processed_id);
-        state.save(state_path)?;
+        handle.await?;
+        state.mark_completed(message_id);
+        println!("ACK: Sent for ID={}", message_id);
     }
 
+    // Checking for commutativity
+    for i in 0..5 {
+        let message = Message::new(format!("Message {}", i));
+        let message_id = message.id;
+
+        if state.is_processed(&message_id) {
+            println!(
+                "Checking for idempotence: The message has not been reprocessed. ID={}",
+                message_id
+            );
+        } else {
+            println!(
+                "Checking for idempotence: The message is being reprocessed. ID={}",
+                message_id
+            );
+        }
+    }
+
+    state.save(state_path);
     Ok(())
 }
