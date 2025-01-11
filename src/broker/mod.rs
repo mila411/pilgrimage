@@ -53,7 +53,7 @@ pub struct Broker {
     storage: Arc<Mutex<Storage>>,
     consumer_groups: Arc<Mutex<HashMap<String, ConsumerGroup>>>,
     nodes: Arc<Mutex<HashMap<String, Node>>>,
-    partitions: Arc<Mutex<HashMap<String, Partition>>>,
+    partitions: Arc<Mutex<HashMap<String, Shard>>>,
     replicas: Arc<Mutex<HashMap<String, Vec<String>>>>,
     leader: Arc<Mutex<Option<String>>>,
     pub message_queue: Arc<MessageQueue>,
@@ -482,7 +482,7 @@ impl Node {
     }
 }
 
-pub struct Partition {
+pub struct Shard {
     pub node_id: String,
 }
 
@@ -716,7 +716,7 @@ mod tests {
 
         let mut partitions = HashMap::new();
         for i in 0..3 {
-            partitions.insert(i.to_string(), Partition {
+            partitions.insert(i.to_string(), Shard {
                 node_id: format!("node_{}", i),
             });
         }
@@ -757,7 +757,7 @@ mod tests {
         let mut partitions = HashMap::new();
         for i in 0..3 {
             let partition_id = i.to_string();
-            partitions.insert(partition_id, Partition {
+            partitions.insert(partition_id, Shard {
                 node_id: format!("node_{}", i),
             });
         }
@@ -766,7 +766,6 @@ mod tests {
         let partition_id = "test_partition";
         let node_index = partition_id.chars().next().map(|c| c as usize).unwrap_or(0) % nodes.len();
 
-        // 検証
         assert!(node_index < nodes.len(), "Node index is out of range.");
         assert!(partitions.contains_key("0"), "Partition 0 does not exist.");
     }
@@ -856,7 +855,6 @@ mod tests {
             }
         });
 
-        // タイムアウト処理
         match replication.await {
             Ok(_) => {
                 let replicas = broker.replicas.lock().unwrap();
@@ -981,7 +979,7 @@ mod tests {
             let mut file = File::create(&log_path).unwrap();
             writeln!(file, "Initial content").unwrap();
         }
-        fs::set_permissions(&log_path, fs::Permissions::from_mode(0o444)).unwrap(); // 読み取り専用
+        fs::set_permissions(&log_path, fs::Permissions::from_mode(0o444)).unwrap();
 
         let broker = create_test_broker_with_path(log_path.to_str().unwrap());
         let result = broker.write_log("This should handle permission error");

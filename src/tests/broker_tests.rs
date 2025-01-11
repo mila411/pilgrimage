@@ -525,7 +525,7 @@ fn test_write_log_no_permissions() {
         let mut file = File::create(&log_path).unwrap();
         writeln!(file, "Initial content").unwrap();
     }
-    fs::set_permissions(&log_path, fs::Permissions::from_mode(0o444)).unwrap(); // 読み取り専用
+    fs::set_permissions(&log_path, fs::Permissions::from_mode(0o444)).unwrap();
 
     let broker = create_test_broker_with_path(log_path.to_str().unwrap());
     let result = broker.write_log("This should handle permission error");

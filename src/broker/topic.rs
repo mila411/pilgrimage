@@ -82,7 +82,7 @@ impl Topic {
                         messages: Vec::new(),
                     })
                     .collect(),
-                next_offset: 0, // 初期化
+                next_offset: 0,
             })
             .collect();
 
