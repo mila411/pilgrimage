@@ -424,6 +424,18 @@ mod tests {
     use actix_web::{App, test, web};
     use serde_json::json;
 
+    /// Test for starting a new broker.
+    ///
+    /// # Purpose
+    /// This test ensures that a broker can be successfully started
+    /// by making a POST request to the `/start` endpoint with valid JSON data.
+    ///
+    /// # Steps
+    /// 1. Create a new [`AppState`] instance with an empty brokers map.
+    /// 2. Initialize the Actix web application with the [`start_broker`] route.
+    /// 3. Create a test request with valid broker start information.
+    /// 4. Call the service with the test request.
+    /// 5. Assert that the response status is successful.
     #[actix_rt::test]
     async fn test_start_broker() {
         let state = AppState {
@@ -451,6 +463,22 @@ mod tests {
         assert!(resp.status().is_success());
     }
 
+    /// Test for stopping a broker.
+    ///
+    /// # Purpose
+    /// This test ensures that a broker can be started and then stopped successfully
+    /// by making POST requests to the `/start` and `/stop` endpoints with valid JSON data.
+    ///
+    /// # Steps
+    /// 1. Create a new [`AppState`] instance with an empty brokers map.
+    /// 2. Initialize the Actix web application with the [`start_broker`]
+    ///    and [`stop_broker`] routes.
+    /// 3. Create a test request with valid broker start information.
+    /// 4. Call the service with the start request.
+    /// 5. Create a test request to stop the previously started broker.
+    /// 6. Call the service with the stop request.
+    /// 7. Assert that the response status is successful,
+    ///    indicating that the broker has been stopped.
     #[actix_rt::test]
     async fn test_stop_broker() {
         let state = AppState {
@@ -490,6 +518,21 @@ mod tests {
         assert!(resp.status().is_success());
     }
 
+    /// Test for sending a message to a broker.
+    ///
+    /// # Purpose
+    /// This test ensures that a broker can be started and
+    /// a message can be sent to it successfully by making POST requests
+    /// to the `/start` and `/send` endpoints with valid JSON data.
+    ///
+    /// # Steps
+    /// 1. Create a new [`AppState`] instance with an empty brokers map.
+    /// 2. Initialize the Actix web application with the [`start_broker`] and `send_message` routes.
+    /// 3. Create a test request with valid broker start information.
+    /// 4. Call the service with the start request.
+    /// 5. Create a test request to send a message to the started broker.
+    /// 6. Call the service with the send request.
+    /// 7. Assert that the response status is successful, indicating that the message was sent.
     #[actix_rt::test]
     async fn test_send_message() {
         let state = AppState {
@@ -530,6 +573,26 @@ mod tests {
         assert!(resp.status().is_success());
     }
 
+    /// Test for consuming messages from a broker.
+    ///
+    /// # Purpose
+    /// This test ensures that a broker can be started,
+    /// a message can be sent to it,
+    /// and the message can be consumed successfully by making POST requests to the `/start`,
+    /// `/send`, and `/consume` endpoints with valid JSON data.
+    ///
+    /// # Steps
+    /// 1. Create a new [`AppState`] instance with an empty brokers map.
+    /// 2. Initialize the Actix web application with the [`start_broker`],
+    ///    `send_message`, and `consume_messages` routes.
+    /// 3. Create a test request to start a broker with valid information.
+    /// 4. Call the service with the start request.
+    /// 5. Create a test request to send a message to the started broker.
+    /// 6. Call the service with the send request.
+    /// 7. Create a test request to consume the message from the broker.
+    /// 8. Call the service with the consume request.
+    /// 9. Assert that the response status is successful,
+    ///    indicating that the message was consumed.
     #[actix_rt::test]
     async fn test_consume_messages() {
         let state = AppState {
@@ -581,6 +644,21 @@ mod tests {
         assert!(resp.status().is_success());
     }
 
+    /// Test for checking the status of a broker.
+    ///
+    /// # Purpose
+    /// This test ensures that a broker can be started and
+    /// its status can be checked successfully by making POST requests
+    /// to the `/start` and `/status` endpoints with valid JSON data.
+    ///
+    /// # Steps
+    /// 1. Create a new [`AppState`] instance with an empty brokers map.
+    /// 2. Initialize the Actix web application with the [`start_broker`] and `broker_status` routes.
+    /// 3. Create a test request to start a broker with valid information.
+    /// 4. Call the service with the start request.
+    /// 5. Create a test request to check the status of the started broker.
+    /// 6. Call the service with the status request.
+    /// 7. Assert that the response status is successful, indicating that the broker is healthy.
     #[actix_rt::test]
     async fn test_broker_status() {
         let state = AppState {
@@ -620,6 +698,21 @@ mod tests {
         assert!(resp.status().is_success());
     }
 
+    /// Test for starting a broker that is already running.
+    ///
+    /// # Purpose
+    /// This test ensures that attempting to start a broker that is already running
+    /// returns a [`actix_web::http::StatusCode::BAD_REQUEST`] status code.
+    ///
+    /// # Steps
+    /// 1. Create a new [`AppState`] instance with an empty brokers map.
+    /// 2. Initialize the Actix web application with the [`start_broker`] route.
+    /// 3. Create a test request to start a broker with valid information.
+    /// 4. Call the service with the start request.
+    /// 5. Create another test request to start the same broker again with the same information.
+    /// 6. Call the service with the second start request (step 5).
+    /// 7. Assert that the response status is [`actix_web::http::StatusCode::BAD_REQUEST`],
+    ///    indicating that the broker is already running.
     #[actix_rt::test]
     async fn test_start_broker_already_running() {
         let state = AppState {
@@ -661,6 +754,19 @@ mod tests {
         assert_eq!(resp.status(), actix_web::http::StatusCode::BAD_REQUEST);
     }
 
+    /// Test for stopping a broker that is not running.
+    ///
+    /// # Purpose
+    /// This test ensures that attempting to stop a broker that is not running returns a
+    /// [`actix_web::http::StatusCode::BAD_REQUEST`] status code.
+    ///
+    /// # Steps
+    /// 1. Create a new [`AppState`] instance with an empty brokers map.
+    /// 2. Initialize the Actix web application with the [`stop_broker`] route.
+    /// 3. Create a test request to stop a broker that is not running.
+    /// 4. Call the service with the stop request.
+    /// 5. Assert that the response status is [`actix_web::http::StatusCode::BAD_REQUEST`],
+    ///    indicating that the broker is not running.
     #[actix_rt::test]
     async fn test_stop_broker_not_running() {
         let state = AppState {
@@ -686,6 +792,19 @@ mod tests {
         assert_eq!(resp.status(), actix_web::http::StatusCode::BAD_REQUEST);
     }
 
+    /// Test for sending a message to a broker that is not running.
+    ///
+    /// # Purpose
+    /// This test ensures that attempting to send a message to a broker
+    /// that is not running returns a [`actix_web::http::StatusCode::BAD_REQUEST`] status code.
+    ///
+    /// # Steps
+    /// 1. Create a new [`AppState`] instance with an empty brokers map.
+    /// 2. Initialize the Actix web application with the [`send_message`] route.
+    /// 3. Create a test request to send a message to a broker that is not running.
+    /// 4. Call the service with the send request.
+    /// 5. Assert that the response status is [`actix_web::http::StatusCode::BAD_REQUEST`],
+    ///    indicating that the broker is not running.
     #[actix_rt::test]
     async fn test_send_message_no_broker() {
         let state = AppState {
@@ -712,6 +831,19 @@ mod tests {
         assert_eq!(resp.status(), actix_web::http::StatusCode::BAD_REQUEST);
     }
 
+    /// Test for consuming messages from a broker that is not running.
+    ///
+    /// # Purpose
+    /// This test ensures that attempting to consume messages from a broker
+    /// that is not running returns a [`actix_web::http::StatusCode::BAD_REQUEST`] status code.
+    ///
+    /// # Steps
+    /// 1. Create a new [`AppState`] instance with an empty brokers map.
+    /// 2. Initialize the Actix web application with the [`consume_messages`] route.
+    /// 3. Create a test request to consume messages from a broker that is not running.
+    /// 4. Call the service with the consume request.
+    /// 5. Assert that the response status is [`actix_web::http::StatusCode::BAD_REQUEST`],
+    ///    indicating that the broker is not running.
     #[actix_rt::test]
     async fn test_consume_messages_no_broker() {
         let state = AppState {
@@ -737,6 +869,19 @@ mod tests {
         assert_eq!(resp.status(), actix_web::http::StatusCode::BAD_REQUEST);
     }
 
+    /// Test for checking the status of a broker that is not running.
+    ///
+    /// # Purpose
+    /// This test ensures that attempting to check the status of a broker that is not running
+    /// returns a [`actix_web::http::StatusCode::BAD_REQUEST`] status code.
+    ///
+    /// # Steps
+    /// 1. Create a new [`AppState`] instance with an empty brokers map.
+    /// 2. Initialize the Actix web application with the [`broker_status`] route.
+    /// 3. Create a test request to check the status of a broker that is not running.
+    /// 4. Call the service with the status request.
+    /// 5. Assert that the response status is [`actix_web::http::StatusCode::BAD_REQUEST`],
+    ///    indicating that the broker is not running.
     #[actix_rt::test]
     async fn test_broker_status_no_broker() {
         let state = AppState {
@@ -762,6 +907,20 @@ mod tests {
         assert_eq!(resp.status(), actix_web::http::StatusCode::BAD_REQUEST);
     }
 
+    /// Test for running the server and starting a broker.
+    ///
+    /// # Purpose
+    /// This test ensures that the server can be started,
+    /// and a broker can be successfully started by making a POST request
+    /// to the `/start` endpoint with valid JSON data.
+    ///
+    /// # Steps
+    /// 1. Initialize the Actix web server with all necessary routes
+    ///    (`/start`, `/stop`, `/send`, `/consume`, `/status`).
+    /// 2. Create a test request to start a broker with valid information.
+    /// 3. Call the service with the start request.
+    /// 4. Assert that the response status is successful,
+    ///    indicating that the broker has been started and the server is running.
     #[actix_rt::test]
     async fn test_run_server() {
         let srv = actix_test::start(|| {
