@@ -31,7 +31,7 @@ impl TokenManager {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs() as usize
-            + 3600; // 1時間後に期限切れ
+            + 3600;
 
         let claims = Claims {
             sub: username.to_string(),

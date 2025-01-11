@@ -766,7 +766,6 @@ mod tests {
         let partition_id = "test_partition";
         let node_index = partition_id.chars().next().map(|c| c as usize).unwrap_or(0) % nodes.len();
 
-        // 検証
         assert!(node_index < nodes.len(), "Node index is out of range.");
         assert!(partitions.contains_key("0"), "Partition 0 does not exist.");
     }
@@ -856,7 +855,6 @@ mod tests {
             }
         });
 
-        // タイムアウト処理
         match replication.await {
             Ok(_) => {
                 let replicas = broker.replicas.lock().unwrap();
@@ -981,7 +979,7 @@ mod tests {
             let mut file = File::create(&log_path).unwrap();
             writeln!(file, "Initial content").unwrap();
         }
-        fs::set_permissions(&log_path, fs::Permissions::from_mode(0o444)).unwrap(); // 読み取り専用
+        fs::set_permissions(&log_path, fs::Permissions::from_mode(0o444)).unwrap();
 
         let broker = create_test_broker_with_path(log_path.to_str().unwrap());
         let result = broker.write_log("This should handle permission error");
