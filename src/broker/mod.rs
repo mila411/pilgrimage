@@ -53,7 +53,7 @@ pub struct Broker {
     storage: Arc<Mutex<Storage>>,
     consumer_groups: Arc<Mutex<HashMap<String, ConsumerGroup>>>,
     nodes: Arc<Mutex<HashMap<String, Node>>>,
-    partitions: Arc<Mutex<HashMap<String, Partition>>>,
+    partitions: Arc<Mutex<HashMap<String, Shard>>>,
     replicas: Arc<Mutex<HashMap<String, Vec<String>>>>,
     leader: Arc<Mutex<Option<String>>>,
     pub message_queue: Arc<MessageQueue>,
@@ -482,7 +482,7 @@ impl Node {
     }
 }
 
-pub struct Partition {
+pub struct Shard {
     pub node_id: String,
 }
 
@@ -716,7 +716,7 @@ mod tests {
 
         let mut partitions = HashMap::new();
         for i in 0..3 {
-            partitions.insert(i.to_string(), Partition {
+            partitions.insert(i.to_string(), Shard {
                 node_id: format!("node_{}", i),
             });
         }
@@ -757,7 +757,7 @@ mod tests {
         let mut partitions = HashMap::new();
         for i in 0..3 {
             let partition_id = i.to_string();
-            partitions.insert(partition_id, Partition {
+            partitions.insert(partition_id, Shard {
                 node_id: format!("node_{}", i),
             });
         }
