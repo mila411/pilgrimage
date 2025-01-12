@@ -1,3 +1,4 @@
+pub mod amqp_handler;
 /// Trigger for CI testing line
 pub mod auth;
 pub mod broker;
