@@ -459,6 +459,7 @@
     html_favicon_url = "https://raw.githubusercontent.com/mila411/pilgrimage/refs/heads/main/.github/images/logo.png"
 )]
 
+pub mod amqp_handler;
 /// Trigger for CI testing line
 pub mod auth;
 pub mod broker;

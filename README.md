@@ -56,20 +56,61 @@ When using Pilgramage as a Crate, client authentication is implemented, but at p
 - Data Encryption
 - CLI based console
 - WEB based console
+- Support AMQP
 
 ## Basic Usage
 
 ```rust
 use pilgrimage::broker::Broker;
-use pilgrimage::amqp_handler::{setup_amqp, send_message, receive_messages};
-use tokio;
+use pilgrimage::message::message::Message;
+use pilgrimage::schema::registry::SchemaRegistry;
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::Duration;
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let channel = setup_amqp().await?;
-    send_message(&channel, "Hello, Pilgrimage!").await?;
-    receive_messages(&channel).await?;
-    Ok(())
+fn main() {
+    // Creating a schema registry
+    let schema_registry = SchemaRegistry::new();
+    let schema_def = r#"{"type":"record","name":"test","fields":[{"name":"id","type":"string"}]}"#;
+    schema_registry
+        .register_schema("test_topic", schema_def)
+        .unwrap();
+
+    // Broker Creation
+    let broker = Arc::new(Mutex::new(Broker::new("broker1", 3, 2, "logs")));
+
+    // Creating a topic
+    {
+        let mut broker = broker.lock().unwrap();
+        broker.create_topic("test_topic", Some(1)).unwrap();
+    }
+
+    // Receiving thread
+    let broker_clone = Arc::clone(&broker);
+    let receiver = thread::spawn(move || {
+        for _ in 0..5 {
+            let broker = broker_clone.lock().unwrap();
+            if let Some(message) = broker.receive_message() {
+                println!("Received: {}", message.content);
+            }
+            drop(broker);
+            thread::sleep(Duration::from_millis(100));
+        }
+    });
+
+    // Sender processing
+    for i in 1..=5 {
+        let message = Message::new(format!("Message {}", i));
+        {
+            let broker = broker.lock().unwrap();
+            broker.send_message(message).unwrap();
+            println!("Sent message {}", i);
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+
+    // Waiting for the end of the incoming thread
+    receiver.join().unwrap();
 }
 ```
 

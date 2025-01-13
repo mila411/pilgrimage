@@ -58,7 +58,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     for i in 0..5 {
         let message = Message::new(format!("Message {}", i));
-        let message_id = message.id.clone();
+        let message_id = message.id;
 
         if state.processed_ids.contains(&message_id) {
             println!(

@@ -1,6 +1,6 @@
 [package]
 name = "pilgrimage"
-version = "0.12.3"
+version = "0.13.1"
 edition = "2024"
 authors = ["Kenny Miller Song"]
 description = "A Kafka-like message broker in Rust"
@@ -40,6 +40,9 @@ prometheus = "0.13"
 lazy_static = "1.4"
 uuid = { version = "1.0", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
+tokio-amqp = "2.0.0"
+futures-util = "0.3"
+lapin = "2.5.0"
 
 [dev-dependencies]
 env_logger = "0.10"

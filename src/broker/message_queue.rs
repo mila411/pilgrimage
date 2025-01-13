@@ -31,6 +31,38 @@ impl MessageQueue {
         }
     }
 
+    pub fn push(&self, message: Message) -> Result<(), String> {
+        let mut queue = self.queue.lock().map_err(|e| e.to_string())?;
+        queue.push_back(message);
+        self.condvar.notify_one();
+        MESSAGES_RECEIVED.inc();
+
+        if queue.len() > self.auto_scaler.high_watermark() {
+            self.auto_scaler.scale_up().map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }
+
+    pub fn pop(&self) -> Option<Message> {
+        let mut queue = self.queue.lock().ok()?;
+        while queue.is_empty() {
+            queue = self.condvar.wait(queue).ok()?;
+        }
+        let message = queue.pop_front();
+
+        if queue.len() < self.auto_scaler.low_watermark() {
+            let _ = self.auto_scaler.scale_down();
+        }
+        message
+    }
+
+    pub fn is_processed(&self, id: &Uuid) -> bool {
+        self.processed_ids
+            .lock()
+            .map(|ids| ids.contains(id))
+            .unwrap_or(false)
+    }
+
     pub fn send(&self, message: Message) -> Result<(), String> {
         let mut processed_ids = self.processed_ids.lock().unwrap();
         if processed_ids.contains(&message.id) {

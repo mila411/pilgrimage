@@ -721,7 +721,7 @@ mod tests {
             });
         }
         let partition_id = "test_partition";
-        let nodes = vec!["node1", "node2", "node3"];
+        let nodes = ["node1", "node2", "node3"];
         let node_index = partition_id.as_bytes()[0] as usize % nodes.len();
 
         assert!(node_index < nodes.len(), "Node index is out of range.");
@@ -762,7 +762,7 @@ mod tests {
             });
         }
 
-        let nodes = vec!["node1", "node2", "node3"];
+        let nodes = ["node1", "node2", "node3"];
         let partition_id = "test_partition";
         let node_index = partition_id.chars().next().map(|c| c as usize).unwrap_or(0) % nodes.len();
 
@@ -1207,7 +1207,7 @@ mod tests {
         if let Some(topic_data) = broker.topics.get(topic) {
             assert_eq!(
                 topic_data.partitions.len(),
-                num_partitions as usize,
+                { num_partitions },
                 "The number of partitions does not match."
             );
         }
