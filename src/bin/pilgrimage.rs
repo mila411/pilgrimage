@@ -7,7 +7,7 @@ use std::time::Duration;
 fn main() {
     let matches = App::new("Pilgrimage")
         .version("1.0")
-        .author("Your Name")
+        .author("Kenny (Miller) Song")
         .about("Message Broker CLI")
         .subcommand(
             SubCommand::with_name("start")
