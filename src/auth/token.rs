@@ -1,4 +1,5 @@
-//! This module provides functionality for generating and verifying JSON Web Tokens (JWTs).
+//! Module for generating and verifying JSON Web Tokens (JWTs).
+//!
 //! It includes a [`TokenManager`] struct for managing JWT encoding and decoding,
 //! and a [`Claims`] struct for representing the claims in a JWT.
 
