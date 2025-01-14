@@ -1,3 +1,4 @@
+#![allow(clippy::needless_doctest_main)]
 //! [![github]](https://github.com/mila411/pilgrimage)&ensp;
 //! [![crates-io]](https://crates.io/crates/pilgrimage)&ensp;
 //! [![docs-rs]](https://docs.rs/pilgrimage/latest/pilgrimage/)
