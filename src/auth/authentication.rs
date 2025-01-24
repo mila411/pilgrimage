@@ -8,6 +8,23 @@
 //! of the [`Authenticator`] trait that uses a HashMap for storing credentials.
 //! The [`BasicAuthenticator`] struct also provides a method for adding new users to the
 //! authenticator.
+//!
+//! # Examples
+//! ```rust
+//! use pilgrimage::auth::authentication::{Authenticator, BasicAuthenticator};
+//!
+//! // Create a new BasicAuthenticator instance
+//! let mut authenticator = BasicAuthenticator::new();
+//!
+//! // Add some users
+//! authenticator.add_user("user1", "password");
+//! authenticator.add_user("user2", "password");
+//!
+//! // Authenticate users
+//! assert!(authenticator.authenticate("user1", "password").unwrap());
+//! assert!(!authenticator.authenticate("user1", "wrong_password").unwrap());
+//! assert!(!authenticator.authenticate("user3", "password").unwrap());
+//! ```
 
 use std::collections::HashMap;
 use std::error::Error;

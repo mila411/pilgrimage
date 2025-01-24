@@ -6,7 +6,7 @@
 //!
 //! The [`Permission`] enum represents the permissions that can be assigned to a role.
 //!
-//! # Example
+//! # Examples
 //! Below we will demonstrate how to use the [`RoleBasedAccessControl`]
 //! structure to manage roles and permissions.
 //! ```

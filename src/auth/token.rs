@@ -2,6 +2,25 @@
 //!
 //! It includes a [`TokenManager`] struct for managing JWT encoding and decoding,
 //! and a [`Claims`] struct for representing the claims in a JWT.
+//!
+//! # Examples
+//! Below we will demonstrate how to use the [`TokenManager`] to generate and verify JWT tokens.
+//! ```
+//! use crate::pilgrimage::auth::token::TokenManager;
+//!
+//! // Generate a new token manager with the secret key
+//! let token_manager = TokenManager::new(b"MySuperSecret");
+//!
+//! // Generate a new token for the user "admin" with the role "admin"
+//! let token = token_manager.generate_token("admin", vec!["admin".to_string()]).unwrap();
+//!
+//! // Verify the token and get the claims
+//! let claims = token_manager.verify_token(&token).unwrap();
+//!
+//! // Check the claims of the token (username, roles)
+//! assert_eq!(claims.sub, "admin");
+//! assert_eq!(claims.roles, vec!["admin".to_string()]);
+//! ```
 
 use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use serde::{Deserialize, Serialize};
