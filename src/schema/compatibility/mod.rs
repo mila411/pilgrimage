@@ -1,3 +1,33 @@
+//! Module containing the compatibility check for schema evolution.
+//!
+//! The compatibility check ensures that new schemas can read data written by old schemas.
+//!
+//! # Example
+//! The following example demonstrates how to check the compatibility between two schemas.
+//! ```
+//! use pilgrimage::schema::compatibility::Compatibility;
+//! use pilgrimage::schema::version::SchemaVersion;
+//! use pilgrimage::schema::registry::Schema;
+//!
+//! // Get an old schema (we are using a dummy schema for demonstration purposes)
+//! let old_schema = Schema {
+//!     id: 1,
+//!     version: SchemaVersion::new(1),
+//!     definition: r#"{"type":"record","fields":[{"name":"id","type":"string"}]}"#.to_string(),
+//! };
+//!
+//! // Get a new schema (we are using a dummy schema for demonstration purposes)
+//! let new_schema = Schema {
+//!    id: 2,
+//!   version: SchemaVersion::new(2),
+//!     definition: r#"{"type":"record","fields":[{"name":"id","type":"string"},{"name":"value","type":"string","default":""}]}"#.to_string(),
+//! };
+//!
+//! // Check the compatibility between the new schema and the old schema
+//! let compatibility = Compatibility::BACKWARD;
+//! assert!(compatibility.check(&new_schema, &old_schema));
+//! ```
+
 use crate::schema::registry::Schema;
 use serde_json::Value;
 
@@ -11,9 +41,13 @@ use serde_json::Value;
 /// * `NONE` - No compatibility checks.
 #[derive(Debug, Clone, Copy)]
 pub enum Compatibility {
+    /// Ensures that new schemas can read data written by old schemas.
     BACKWARD,
+    /// Ensures that old schemas can read data written by new schemas.
     FORWARD,
+    /// Ensures both backward and forward compatibility.
     FULL,
+    /// No compatibility checks.
     NONE,
 }
 
@@ -148,6 +182,15 @@ impl Compatibility {
 mod tests {
     use super::*;
 
+    /// Tests backward compatibility.
+    ///
+    /// # Purpose
+    /// This test ensures that the new schema is backward compatible with the old schema.
+    ///
+    /// # Steps
+    /// 1. Create an old schema with a single field.
+    /// 2. Create a new schema with the same field and an additional field.
+    /// 3. Check if the new schema is backward compatible with the old schema.
     #[test]
     fn test_backward_compatibility() {
         let old_schema = Schema {
