@@ -63,7 +63,7 @@ impl TokenManager {
     ///
     /// # Arguments
     /// * `secret`: A slice of bytes representing the secret key used for encoding and decoding.
-    ///             The key will be used to sign and verify the JWT token.
+    ///   The key will be used to sign and verify the JWT token.
     ///
     /// # Returns
     /// * A new `TokenManager` instance.

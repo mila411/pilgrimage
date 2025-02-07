@@ -85,9 +85,9 @@ impl Subscriber {
     /// # Arguments
     /// * `id` - A unique identifier for the subscriber.
     /// * `callback` - A callback function to be executed when a message is published.
-    ///                The callback function is executed when a message is published to the topic
-    ///                the subscriber is subscribed to.
-    ///                It takes a string as an argument, which is the message that was published.
+    ///   The callback function is executed when a message is published to the topic
+    ///   the subscriber is subscribed to.
+    ///   It takes a string as an argument, which is the message that was published.
     ///
     /// # Returns
     /// A new subscriber with the given id and callback function.

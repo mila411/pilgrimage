@@ -8,8 +8,7 @@
 //! # Main components
 //! - [`Encryptor`]: A struct that provides encryption and decryption functionality.
 //! - [`CryptoError`]: An enum that represents errors that may occur during encryption
-//!                    and decryption.
-//!                    Each method of the [`Encryptor`] is documented with the possible errors.
+//!   and decryption. Each method of the [`Encryptor`] is documented with the possible errors.
 //!
 //! # Examples
 //! Encrypt and decrypt data using the [`Encryptor`]:

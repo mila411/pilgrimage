@@ -116,17 +116,17 @@
 //!
 //! - **Message Queue**: Efficient message queue implementation using `Mutex` and `VecDeque`.
 //! - **Broker**: Core broker functionality including message handling, node management,
-//!               and leader election.
+//!   and leader election.
 //! - **Consumer Groups**: Support for consumer groups to allow multiple consumers
-//!                        to read from the same topic.
+//!   to read from the same topic.
 //! - **Leader Election**: Mechanism for electing a leader among brokers
-//!                        to manage partitions and replication.
+//!   to manage partitions and replication.
 //! - **Storage**: Persistent storage of messages using local files.
 //! - **Replication**: Replication of messages across multiple brokers for fault tolerance.
 //! - **Schema Registry**: Management of message schemas to ensure compatibility
-//!                        between producers and consumers.
+//!   between producers and consumers.
 //! - **Benchmarking**: Comprehensive benchmarking tests to measure performance
-//!                     of various components.
+//!   of various components.
 //! - **Automatic Scaling:** Automatically scale the number of instances based on load.
 //! - **Log Compressions:** Compress and optimize logs.
 //!
@@ -195,7 +195,7 @@
 //! - `--replication`, `-r` (required): Sets the replication factor.
 //! - `--storage`, `-s` (required): Sets the storage path.
 //! - `--test-mode`: Runs the broker in test mode, which breaks out of the main loop quickly
-//!                  for testing purposes.
+//!   for testing purposes.
 //!
 //! **Example:**
 //!
@@ -295,14 +295,14 @@
 //! ### Additional Information
 //!
 //! - **Help Command:**
-//!     To view all available commands and options, use the `help` command:
+//!   To view all available commands and options, use the `help` command:
 //!
 //! ```bash
 //! pilgrimage help
 //! ```
 //!
 //! - **Version Information:**
-//!     To check the current version of Pilgrimage, use:
+//!   To check the current version of Pilgrimage, use:
 //!
 //! ```bash
 //! pilgrimage --version

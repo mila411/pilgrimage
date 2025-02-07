@@ -62,11 +62,11 @@ use std::sync::{Arc, Mutex};
 ///
 /// # Fields
 /// * `group_id` - The ID of the consumer group.
-///                It is used to uniquely identify the group.
+///   It is used to uniquely identify the group.
 /// * `members` - The members of the consumer group.
-///               Each member is identified by a unique consumer ID.
+///   Each member is identified by a unique consumer ID.
 /// * `assignments` - The partition assignments for the members.
-///                   It maps each member to the list of partitions assigned to it.
+///   It maps each member to the list of partitions assigned to it.
 pub struct ConsumerGroup {
     /// The ID of the consumer group. It is used to uniquely identify the group.
     pub group_id: String,
@@ -116,8 +116,7 @@ impl ConsumerGroup {
     ///
     /// Associates the given subscriber with the consumer ID
     /// and adds it to the group's members.
-    /// After adding the member, rebalances the partitions among the members
-    /// ([`ConsumerGroup::rebalance_partitions`]).
+    /// After adding the member, rebalances the partitions among the members.
     ///
     /// # Arguments
     ///
@@ -205,7 +204,7 @@ impl ConsumerGroup {
     /// # Returns
     ///
     /// * `Result<(), String>` - `Ok(())` if the message was delivered successfully,
-    ///                          or an error message otherwise.
+    ///   or an error message otherwise.
     ///
     /// # Examples
     /// ```

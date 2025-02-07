@@ -94,8 +94,8 @@ impl RoleBasedAccessControl {
     ///
     /// # Arguments
     /// * `role`: A string slice representing the role name.
-    ///           Each role should have a unique name,
-    ///           if a role with the same name already exists, it will be overwritten.
+    ///   Each role should have a unique name,
+    ///   if a role with the same name already exists, it will be overwritten.
     /// * `permissions`: A vector of [`Permission`] associated with the role.
     ///
     /// # Warning
@@ -141,8 +141,7 @@ impl RoleBasedAccessControl {
     ///
     /// # Returns
     /// * `bool`: A boolean indicating whether the user has the required permission.
-    ///           Returns `true` if the user has the required permission,
-    ///           `false` in all other cases.
+    ///   Returns `true` if the user has the required permission, `false` in all other cases.
     pub fn has_permission(&self, username: &str, required_permission: &Permission) -> bool {
         self.user_roles.get(username).is_some_and(|roles| {
             roles.iter().any(|role| {
