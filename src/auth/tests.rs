@@ -41,11 +41,10 @@ mod tests {
     #[test]
     fn test_rbac() {
         let mut rbac = RoleBasedAccessControl::new();
-        rbac.add_role("admin", vec![
-            Permission::Read,
-            Permission::Write,
-            Permission::Admin,
-        ]);
+        rbac.add_role(
+            "admin",
+            vec![Permission::Read, Permission::Write, Permission::Admin],
+        );
         rbac.add_role("user", vec![Permission::Read]);
 
         rbac.assign_role("user1", "admin");
@@ -107,11 +106,10 @@ mod tests {
     #[test]
     fn test_permission_check() {
         let mut rbac = RoleBasedAccessControl::new();
-        rbac.add_role("admin", vec![
-            Permission::Read,
-            Permission::Write,
-            Permission::Admin,
-        ]);
+        rbac.add_role(
+            "admin",
+            vec![Permission::Read, Permission::Write, Permission::Admin],
+        );
         rbac.add_role("user", vec![Permission::Read]);
 
         rbac.assign_role("user1", "admin");
@@ -141,11 +139,10 @@ mod tests {
     #[test]
     fn test_add_and_remove_role() {
         let mut rbac = RoleBasedAccessControl::new();
-        rbac.add_role("admin", vec![
-            Permission::Read,
-            Permission::Write,
-            Permission::Admin,
-        ]);
+        rbac.add_role(
+            "admin",
+            vec![Permission::Read, Permission::Write, Permission::Admin],
+        );
 
         rbac.assign_role("user1", "admin");
         assert!(rbac.has_permission("user1", &Permission::Admin));
@@ -241,11 +238,10 @@ mod tests {
     #[test]
     fn test_permission_inheritance() {
         let mut rbac = RoleBasedAccessControl::new();
-        rbac.add_role("super_admin", vec![
-            Permission::Read,
-            Permission::Write,
-            Permission::Admin,
-        ]);
+        rbac.add_role(
+            "super_admin",
+            vec![Permission::Read, Permission::Write, Permission::Admin],
+        );
         rbac.add_role("admin", vec![Permission::Read, Permission::Write]);
 
         rbac.assign_role("user1", "super_admin");

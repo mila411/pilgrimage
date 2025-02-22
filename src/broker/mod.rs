@@ -716,9 +716,12 @@ mod tests {
 
         let mut partitions = HashMap::new();
         for i in 0..3 {
-            partitions.insert(i.to_string(), Shard {
-                node_id: format!("node_{}", i),
-            });
+            partitions.insert(
+                i.to_string(),
+                Shard {
+                    node_id: format!("node_{}", i),
+                },
+            );
         }
         let partition_id = "test_partition";
         let nodes = ["node1", "node2", "node3"];
@@ -757,9 +760,12 @@ mod tests {
         let mut partitions = HashMap::new();
         for i in 0..3 {
             let partition_id = i.to_string();
-            partitions.insert(partition_id, Shard {
-                node_id: format!("node_{}", i),
-            });
+            partitions.insert(
+                partition_id,
+                Shard {
+                    node_id: format!("node_{}", i),
+                },
+            );
         }
 
         let nodes = ["node1", "node2", "node3"];
