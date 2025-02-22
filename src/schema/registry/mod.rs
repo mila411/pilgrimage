@@ -225,7 +225,6 @@ impl SchemaRegistry {
 }
 
 impl Default for SchemaRegistry {
-    /// Creates a new SchemaRegistry instance with default values.
     fn default() -> Self {
         Self::new()
     }

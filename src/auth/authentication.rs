@@ -72,10 +72,6 @@ impl BasicAuthenticator {
 }
 
 impl Default for BasicAuthenticator {
-    /// Creates a default instance of `BasicAuthenticator`.
-    ///
-    /// # Returns
-    /// * A new `BasicAuthenticator` instance with an empty credentials store.
     fn default() -> Self {
         Self::new()
     }

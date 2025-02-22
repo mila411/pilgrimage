@@ -245,7 +245,6 @@ impl Cluster {
 }
 
 impl Default for Cluster {
-    /// Create a new `Cluster` instance using the default implementation.
     fn default() -> Self {
         Self::new()
     }

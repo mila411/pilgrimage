@@ -150,10 +150,6 @@ impl RoleBasedAccessControl {
 }
 
 impl Default for RoleBasedAccessControl {
-    /// Creates a default instance of `RoleBasedAccessControl`.
-    ///
-    /// # Returns
-    /// * A new `RoleBasedAccessControl` instance with empty roles and user roles stores.
     fn default() -> Self {
         Self::new()
     }
