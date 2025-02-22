@@ -30,15 +30,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 ///
 /// The struct can be serialized and deserialized.
 ///
-/// # Fields
-/// * `sub`: The subject of the token, which is the username.
-/// * `exp`: The expiration time of the token.
-/// * `roles`: The roles associated with the token.
-///
 /// [claims]: https://auth0.com/docs/secure/tokens/json-web-tokens/json-web-token-claims
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Claims {
-    /// The subject of the token.
+    /// The subject of the token, which is the username.
     pub sub: String,
     /// The expiration time of the token.
     pub exp: usize,
@@ -47,10 +42,6 @@ pub struct Claims {
 }
 
 /// A struct responsible for managing the encoding and decoding of JWT tokens.
-///
-/// # Fields
-/// * `encoding_key`: The key used to encode (sign) the JWT token.
-/// * `decoding_key`: The key used to decode (verify) the JWT token.
 pub struct TokenManager {
     /// The key used to encode (sign) the JWT token.
     encoding_key: EncodingKey,

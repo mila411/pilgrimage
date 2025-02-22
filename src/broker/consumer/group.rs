@@ -59,14 +59,6 @@ use std::sync::{Arc, Mutex};
 /// * Each consumer group has a unique ID that is used to identify the group.
 /// * The group members are identified by their consumer IDs.
 /// * The partitions of the topic are distributed among the members of the group.
-///
-/// # Fields
-/// * `group_id` - The ID of the consumer group.
-///   It is used to uniquely identify the group.
-/// * `members` - The members of the consumer group.
-///   Each member is identified by a unique consumer ID.
-/// * `assignments` - The partition assignments for the members.
-///   It maps each member to the list of partitions assigned to it.
 pub struct ConsumerGroup {
     /// The ID of the consumer group. It is used to uniquely identify the group.
     pub group_id: String,
@@ -78,9 +70,6 @@ pub struct ConsumerGroup {
 }
 
 /// Represents a member of a consumer group.
-///
-/// # Fields
-/// * `subscriber` - The [`Subscriber`] associated with the member.
 pub struct GroupMember {
     /// The [`Subscriber`] associated with the member.
     pub subscriber: Subscriber,

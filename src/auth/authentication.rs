@@ -44,9 +44,6 @@ pub trait Authenticator {
 }
 
 /// A struct representing a basic authenticator that uses a HashMap for storing credentials.
-///
-/// # Fields
-/// * `credentials`: A HashMap containing the username-password pairs.
 pub struct BasicAuthenticator {
     /// A HashMap containing the username-password pairs.
     credentials: std::collections::HashMap<String, String>,

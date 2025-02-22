@@ -19,16 +19,13 @@ use core::fmt;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 
-/// Struct representing a schema version.
+/// Struct representing a schema version. It follows the [Semantic Versioning][SV] format.
 ///
 /// A schema version is a three-part version number that follows the format `major.minor.patch`.
 ///
 /// Each part of the version number is an unsigned 32-bit integer.
 ///
-/// # Fields
-/// * `major` - The major version number.
-/// * `minor` - The minor version number.
-/// * `patch` - The patch version number.
+/// [SV]: https://en.wikipedia.org/wiki/Software_versioning#Semantic_versioning
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 pub struct SchemaVersion {
     /// The major version number.

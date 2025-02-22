@@ -29,16 +29,11 @@ use std::sync::{Arc, RwLock};
 /// Struct representing a schema.
 ///
 /// A schema is a JSON object that defines the structure of data for a topic.
-///
-/// # Fields
-/// * `id` - The unique identifier for the schema. It is an unsigned 32-bit integer.
-/// * `version` - The version of the schema ([`SchemaVersion`]).
-/// * `definition` - The schema definition as a JSON string.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Schema {
-    /// The unique identifier for the schema.
+    /// The unique identifier for the schema. It is an unsigned 32-bit integer.
     pub id: u32,
-    /// The version of the schema.
+    /// The version of the schema ([`SchemaVersion`]).
     pub version: SchemaVersion,
     /// The schema definition as a JSON string.
     pub definition: String,
@@ -49,10 +44,6 @@ pub struct Schema {
 /// The schema registry is responsible for managing schemas for different topics.
 /// Schema Registry Implementation
 /// Manage the schema version for each topic and perform compatibility checks.
-///
-/// # Fields
-/// * `schemas` - A map of topic names to a list of schemas.
-/// * `compatibility` - The compatibility mode for the schema registry.
 ///
 /// # Examples
 /// The following example demonstrates how to create a new schema registry.
@@ -70,7 +61,9 @@ pub struct Schema {
 /// assert!(result.is_ok());
 /// ```
 pub struct SchemaRegistry {
+    /// A map of topic names to a list of schemas.
     schemas: Arc<RwLock<HashMap<String, Vec<Schema>>>>,
+    /// The compatibility mode for the schema registry.
     compatibility: Compatibility,
 }
 

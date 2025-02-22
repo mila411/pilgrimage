@@ -316,55 +316,45 @@ pub struct AppState {
 }
 
 /// Deserializable structure for starting a new broker.
-///
-/// # Fields
-/// * `id` - Unique identifier for the broker.
-/// * `partitions` - Number of partitions for the broker.
-/// * `replication` - Replication factor for the broker.
-/// * `storage` - Storage path for the broker.
 #[derive(Deserialize)]
 struct StartRequest {
+    /// Unique identifier for the broker.
     id: String,
+    /// Number of partitions for the broker.
     partitions: usize,
+    /// Replication factor for the broker.
     replication: usize,
+    /// Storage path for the broker.
     storage: String,
 }
 
 /// Deserializable structure for stopping a broker.
-///
-/// # Fields
-/// * `id` - Unique identifier for the broker.
 #[derive(Deserialize)]
 struct StopRequest {
+    /// Unique identifier for the broker.
     id: String,
 }
 
 /// Deserializable structure for sending a message to a broker.
-///
-/// # Fields
-/// * `id` - Unique identifier for the broker.
-/// * `message` - Message to be sent to the broker.
 #[derive(Deserialize)]
 struct SendRequest {
+    /// Unique identifier for the broker.
     id: String,
+    /// Message to be sent to the broker.
     message: String,
 }
 
 /// Deserializable structure for consuming messages from a broker.
-///
-/// # Fields
-/// * `id` - Unique identifier for the broker.
 #[derive(Deserialize)]
 struct ConsumeRequest {
+    /// Unique identifier for the broker.
     id: String,
 }
 
 /// Deserializable structure for checking the status of a broker.
-///
-/// # Fields
-/// * `id` - Unique identifier for the broker.
 #[derive(Deserialize)]
 struct StatusRequest {
+    /// Unique identifier for the broker.
     id: String,
 }
 

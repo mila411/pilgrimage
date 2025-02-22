@@ -53,12 +53,8 @@ pub enum Permission {
 ///
 /// The struct can be used to add roles with permissions,
 /// assign roles to users, and check if a user has a specific permission.
-///
-/// # Fields
-/// * `roles`: A HashMap containing the roles and their associated [`Permission`].
-/// * `user_roles`: A HashMap containing the users and their assigned roles.
 pub struct RoleBasedAccessControl {
-    /// A HashMap containing the roles and their associated permissions.
+    /// A HashMap containing the roles and their associated [`Permission`].
     roles: HashMap<String, Vec<Permission>>,
     /// A HashMap containing the users and their assigned roles.
     user_roles: HashMap<String, Vec<String>>,
