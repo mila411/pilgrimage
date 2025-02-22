@@ -1,12 +1,37 @@
+//! Module for compressing and decompressing log files using gzip.
+//!
+//! The [`LogCompressor`] struct provides methods for compressing and decompressing log files.
+//!
+//! It is useful for managing log file sizes and ensuring efficient storage.
+
 use flate2::Compression;
 use flate2::write::{GzDecoder, GzEncoder};
 use std::fs::File;
 use std::io::{self, Read, Write};
 use std::path::Path;
 
+/// A utility for compressing and decompressing log files.
+///
+/// It uses the gzip format to compress and decompress files.
+///
+/// It is useful for managing log file sizes and ensuring efficient storage.
 pub struct LogCompressor;
 
 impl LogCompressor {
+    /// Compresses a file using gzip compression.
+    ///
+    /// Compresses the contents of the input file and writes the compressed data to the output file.
+    ///
+    /// # Arguments
+    /// * `input_path` - The path to the input file.
+    /// * `output_path` - The path to the output file.
+    ///
+    /// # Returns
+    /// An `io::Result` indicating the success or failure of the operation.
+    ///
+    /// # Errors
+    /// If the input file cannot be read,
+    /// or the output file cannot be written to, an error is returned.
     pub fn compress_file<P: AsRef<Path>>(input_path: P, output_path: P) -> io::Result<()> {
         let input_file = File::open(input_path)?;
         let output_file = File::create(output_path)?;
@@ -18,6 +43,21 @@ impl LogCompressor {
         Ok(())
     }
 
+    /// Decompresses a gzip-compressed file.
+    ///
+    /// Reads the compressed data from the input file
+    /// and writes the decompressed data to the output file.
+    ///
+    /// # Arguments
+    /// * `input_path` - The path to the input file.
+    /// * `output_path` - The path to the output file.
+    ///
+    /// # Returns
+    /// An `io::Result` indicating the success or failure of the operation.
+    ///
+    /// # Errors
+    /// If the input file cannot be read,
+    /// or the output file cannot be written to, an error is returned.
     pub fn decompress_file<P: AsRef<Path>>(input_path: P, output_path: P) -> io::Result<()> {
         let input_file = File::open(input_path)?;
         let output_file = File::create(output_path)?;
@@ -37,6 +77,18 @@ mod tests {
     use std::io::{Read, Write};
     use tempfile::tempdir;
 
+    /// Tests for compressing and decompressing files.
+    ///
+    /// # Purpose
+    /// The tests verify that the [`LogCompressor`] can compress and decompress files correctly.
+    ///
+    /// # Steps
+    /// 1. Create a temporary directory.
+    /// 2. Create an input file with some content.
+    /// 3. Compress the input file.
+    /// 4. Decompress the compressed file.
+    /// 5. Verify that the decompressed file has the same content as the input file.
+    /// 6. Clean up the temporary directory.
     #[test]
     fn test_compress_and_decompress() {
         let dir = tempdir().unwrap();
@@ -68,6 +120,16 @@ mod tests {
         let _ = remove_file(&decompressed_path);
     }
 
+    /// Tests for compressing a file that does not exist.
+    ///
+    /// # Purpose
+    /// The test verifies that the [`LogCompressor::compress_file`] method
+    /// returns an error when the input file does not exist.
+    ///
+    /// # Steps
+    /// 1. Create a temporary directory.
+    /// 2. Attempt to compress a file that does not exist.
+    /// 3. Verify that the method returns an error.
     #[test]
     fn test_compress_file_not_found() {
         let dir = tempdir().unwrap();
@@ -79,6 +141,16 @@ mod tests {
         assert!(result.is_err());
     }
 
+    /// Tests for decompressing a file that does not exist.
+    ///
+    /// # Purpose
+    /// The test verifies that the [`LogCompressor::decompress_file`] method
+    /// returns an error when the input file does not exist.
+    ///
+    /// # Steps
+    /// 1. Create a temporary directory.
+    /// 2. Attempt to decompress a file that does not exist.
+    /// 3. Verify that the method returns an error.
     #[test]
     fn test_decompress_file_not_found() {
         let dir = tempdir().unwrap();
@@ -90,6 +162,18 @@ mod tests {
         assert!(result.is_err());
     }
 
+    /// Tests for compressing and decompressing an empty file.
+    ///
+    /// # Purpose
+    /// The test verifies that the [`LogCompressor`] can compress and decompress an empty file.
+    ///
+    /// # Steps
+    /// 1. Create a temporary directory.
+    /// 2. Create an empty file.
+    /// 3. Compress the empty file.
+    /// 4. Decompress the compressed file.
+    /// 5. Verify that the decompressed file is also empty.
+    /// 6. Clean up the temporary directory.
     #[test]
     fn test_compress_and_decompress_empty_file() {
         let dir = tempdir().unwrap();
