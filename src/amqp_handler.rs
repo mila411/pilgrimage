@@ -1,3 +1,8 @@
+//! Module for interacting with an AMQP (Advanced Message Queuing Protocol) server.
+//!
+//! The module contains the `AmqpConnection` struct,
+//! which provides methods to send and receive messages, as well as manage the queue.
+
 use std::time::Duration;
 
 use futures_util::StreamExt;
@@ -11,13 +16,30 @@ use lapin::{
 };
 use tokio::time::timeout;
 
+/// The `AmqpConnection` struct provides methods to interact with an
+/// AMQP (Advanced Message Queuing Protocol) server.
+///
+/// It allows sending and receiving messages, as well as managing the queue.
 #[derive(Clone)]
 pub struct AmqpConnection {
+    /// The AMQP channel.
     channel: Channel,
+    /// The name of the queue.
     queue_name: String,
 }
 
 impl AmqpConnection {
+    /// Creates a new `AmqpConnection` instance.
+    ///
+    /// It connects to the AMQP server at the specified address and creates a channel.
+    /// It also declares a queue with the specified name.
+    ///
+    /// # Arguments
+    /// * `addr` - The address of the AMQP server.
+    /// * `queue_name` - The name of the queue.
+    ///
+    /// # Returns
+    /// A `Result` containing the `AmqpConnection` instance if successful, or an error.
     pub async fn new(addr: &str, queue_name: &str) -> lapin::Result<Self> {
         let conn = Connection::connect(addr, ConnectionProperties::default()).await?;
         let channel = conn.create_channel().await?;
@@ -36,6 +58,14 @@ impl AmqpConnection {
         })
     }
 
+    /// Sends a message to the queue.
+    ///
+    /// # Arguments
+    /// * `message` - The message to send.
+    ///
+    /// # Returns
+    /// * `Ok(())` - If the message is successfully sent.
+    /// * `Err(lapin::Error)` - If an error occurs during message sending.
     pub async fn send_message(&self, message: &str) -> lapin::Result<()> {
         self.channel
             .basic_publish(
@@ -50,6 +80,12 @@ impl AmqpConnection {
         Ok(())
     }
 
+    /// Receives a message from the queue.
+    ///
+    /// # Returns
+    /// * `Ok(String)` - The received message.
+    /// * `Err(lapin::Error)` - If an error occurs during message receiving.
+    /// * `Err(lapin::Error::InvalidChannel(0))` - If the channel is invalid.
     pub async fn receive_message(&self) -> lapin::Result<String> {
         let mut consumer = self
             .channel
@@ -81,6 +117,14 @@ impl AmqpConnection {
         }
     }
 
+    /// Receives a message from the queue with a specific consumer tag.
+    ///
+    /// # Arguments
+    /// * `consumer_tag` - The consumer tag to use.
+    ///
+    /// # Returns
+    /// * `Ok(String)` - The received message.
+    /// * `Err(lapin::Error)` - If an error occurs during message receiving.
     pub async fn receive_message_with_tag(&self, consumer_tag: &str) -> lapin::Result<String> {
         let mut consumer = self
             .channel
@@ -109,6 +153,11 @@ impl AmqpConnection {
         }
     }
 
+    /// Purges the queue, removing all messages from it.
+    ///
+    /// # Returns
+    /// * `Ok(())` - If the queue is successfully purged.
+    /// * `Err(lapin::Error)` - If an error occurs during queue purging.
     pub async fn purge_queue(&self) -> lapin::Result<()> {
         self.channel
             .queue_purge(&self.queue_name, QueuePurgeOptions::default())
@@ -123,10 +172,22 @@ mod tests {
     use std::error::Error;
     use uuid::Uuid;
 
+    /// Utility function to generate a unique queue name.
     fn generate_unique_queue_name(base: &str) -> String {
         format!("{}_{}", base, Uuid::new_v4())
     }
 
+    /// Tests sending and receiving a message.
+    ///
+    /// # Purpose
+    /// The test verifies that a message can be sent to a queue and then received from it.
+    ///
+    /// # Steps
+    /// 1. Create a new `AmqpConnection` instance.
+    /// 2. Purge the queue to remove any existing messages.
+    /// 3. Send a message to the queue.
+    /// 4. Receive a message from the queue.
+    /// 5. Assert that the received message is the same as the sent message.
     #[tokio::test]
     async fn test_message_send_receive() -> Result<(), Box<dyn Error>> {
         let queue_name = generate_unique_queue_name("test_send_receive");
