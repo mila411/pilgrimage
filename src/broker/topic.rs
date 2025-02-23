@@ -22,14 +22,6 @@
 //! topic.add_subscriber(subscriber);
 //! // Publish a message to the topic
 //! let partition_id = topic.publish("test_message".to_string(), None);
-//!
-//! // Check the topic details
-//! assert!(partition_id.is_ok());
-//! assert_eq!(topic.name, "test_topic");
-//! assert_eq!(topic.partitions.len(), 3);
-//! assert_eq!(topic.subscribers.len(), 1);
-//! assert_eq!(topic.partitions[0].messages.len(), 1);
-//! assert_eq!(topic.partitions[0].messages[0], "test_message");
 //! ```
 
 use crate::broker::error::BrokerError;

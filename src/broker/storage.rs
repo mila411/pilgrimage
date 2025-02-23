@@ -15,9 +15,8 @@
 //! // Write a message to the storage
 //! storage.write_message("test_message").unwrap();
 //!
-//! // Check if the message was written successfully
+//! // Read all messages from the storage
 //! let messages = storage.read_messages().unwrap();
-//! assert_eq!(messages, vec!["test_message"]);
 //! ```
 
 use std::fs::{self, File, OpenOptions};

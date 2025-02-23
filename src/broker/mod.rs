@@ -64,7 +64,7 @@ impl ConsumerGroup {
     ///
     /// # Examples
     /// ```
-    /// use pilgrimage::broker::ConsumerGroup;
+    /// use pilgrimage::broker::consumer::group::ConsumerGroup;
     ///
     /// let mut group = ConsumerGroup::new("test_group");
     /// group.reset_assignments();
@@ -363,7 +363,7 @@ impl Broker {
     /// use std::time::Duration;
     ///
     /// let broker = Broker::new("broker1", 3, 2, "logs");
-    /// let result = broker.perform_operation_with_retry(|| {
+    /// let result: Result<i32, i32> = broker.perform_operation_with_retry(|| {
     ///     Ok(42)
     /// }, 3, Duration::from_secs(1));
     ///
