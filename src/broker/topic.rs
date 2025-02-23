@@ -175,10 +175,15 @@ impl Topic {
 
     /// Publishes a message to the topic.
     ///
+    /// If a partition key is provided,
+    /// the message is published to the partition corresponding to the key.
+    /// Otherwise, the partition is selected based on the current system time.
+    ///
     /// # Arguments
     ///
     /// * `message` - The message to publish.
     /// * `partition_key` - An optional key for partitioning.
+    ///   If not provided, the partition is selected based on the current system time.
     ///
     /// # Returns
     /// The partition ID where the message was published.

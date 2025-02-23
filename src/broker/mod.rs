@@ -1,3 +1,23 @@
+//! Module for the broker entity and related functionality.
+//!
+//! The broker is the central entity in the message broker system.
+//! It is responsible for managing topics, partitions, replicas,
+//! consumer groups, leader election, storage, and more.
+//!
+//! The module contains the following submodules:
+//! - [`cluster`]: Cluster management functionality.
+//! - [`consumer`]: Consumer group management functionality.
+//! - [`error`]: Error types for the broker.
+//! - [`leader`]: Leader election functionality.
+//! - [`log_compression`]: Log compression functionality.
+//! - [`message_queue`]: Message queue functionality.
+//! - [`node_management`]: Node management functionality.
+//! - [`scaling`]: Scaling functionality.
+//! - [`storage`]: Storage functionality.
+//! - [`topic`]: Topic management functionality.
+//!
+//! The module also contains the [`Broker`] struct, which represents a broker in the system.
+
 pub mod cluster;
 pub mod consumer;
 pub mod error;
@@ -34,33 +54,70 @@ use std::time::Duration;
 use tokio::sync::oneshot;
 use tokio::time::timeout;
 
+/// A type alias for a collection of consumer groups, keyed by their group names.
 pub type ConsumerGroups = HashMap<String, ConsumerGroup>;
 
 impl ConsumerGroup {
+    /// Resets the assignments of the consumer group.
+    ///
+    /// This method clears the current assignments of the consumer group.
+    ///
+    /// # Examples
+    /// ```
+    /// use pilgrimage::broker::ConsumerGroup;
+    ///
+    /// let mut group = ConsumerGroup::new("test_group");
+    /// group.reset_assignments();
+    /// ```
     pub fn reset_assignments(&mut self) {
         if let Ok(mut map) = self.assignments.lock() {
             map.clear();
         }
     }
 }
+
+/// The `Broker` struct represents a broker in the message broker system.
+///
+/// It contains various fields related to topics, partitions, replicas,
+/// consumer groups, leader election, storage, and more.
 pub struct Broker {
+    /// The unique identifier of the broker.
     id: String,
+    /// A collection of topics managed by the broker.
+    /// The topics are keyed by their names.
     topics: HashMap<String, Topic>,
+    /// The number of partitions for each topic.
     num_partitions: usize,
+    /// The replication factor for each partition.
     replication_factor: usize,
+    /// The current term of the broker.
     term: AtomicU64,
+    /// The leader election instance for the broker.
     leader_election: LeaderElection,
+    /// The storage instance for the broker.
     storage: Arc<Mutex<Storage>>,
+    /// A collection of consumer groups managed by the broker.
     consumer_groups: Arc<Mutex<HashMap<String, ConsumerGroup>>>,
+    /// A collection of nodes in the cluster, keyed by their IDs.
     nodes: Arc<Mutex<HashMap<String, Node>>>,
+    /// A collection of partitions in the cluster, keyed by their IDs.
     partitions: Arc<Mutex<HashMap<String, Shard>>>,
+    /// A collection of replicas for each partition, keyed by the partition ID.
     replicas: Arc<Mutex<HashMap<String, Vec<String>>>>,
+    /// The current leader of the broker.
     leader: Arc<Mutex<Option<String>>>,
+    /// The message queue for the broker.
+    /// The message queue is used to store messages that are waiting to be processed.
     pub message_queue: Arc<MessageQueue>,
+    /// The path to the log file for the broker.
     log_path: String,
+    /// A collection of processed message IDs.
     processed_message_ids: Arc<Mutex<HashSet<Uuid>>>,
+    /// The transaction log for the broker.
     transaction_log: Arc<Mutex<Vec<Message>>>,
+    /// The transaction messages for the broker.
     transaction_messages: Arc<Mutex<Vec<Message>>>,
+    /// A collection of ack waiters for messages.
     ack_waiters: Arc<Mutex<HashMap<Uuid, oneshot::Sender<MessageAck>>>>,
 }
 
@@ -90,6 +147,17 @@ impl Clone for Broker {
 }
 
 impl Broker {
+    /// Creates a new broker with the specified ID,
+    /// number of partitions, replication factor, and storage path.
+    ///
+    /// # Arguments
+    /// * `id` - The unique identifier of the broker.
+    /// * `num_partitions` - The number of partitions for each topic.
+    /// * `replication_factor` - The replication factor for each partition.
+    /// * `storage_path` - The path to the storage directory for the broker.
+    ///
+    /// # Returns
+    /// A new `Broker` instance.
     pub fn new(
         id: &str,
         num_partitions: usize,
@@ -128,11 +196,25 @@ impl Broker {
         broker
     }
 
+    /// Begins a new transaction.
+    ///
+    /// This method clears the transaction messages.
     pub fn begin_transaction(&self) {
         let mut messages = self.transaction_messages.lock().unwrap();
         messages.clear();
     }
 
+    /// Commits the current transaction.
+    ///
+    /// This method sends the messages in the transaction log to the message queue.
+    ///
+    /// If a duplicate message is detected, an error is returned.
+    ///
+    /// # Returns
+    /// An empty result if the transaction is committed successfully.
+    ///
+    /// # Errors
+    /// An error if a duplicate message is detected.
     pub fn commit_transaction(&self) -> Result<(), String> {
         let log = self.transaction_log.lock().unwrap();
         let mut processed_ids = self.processed_message_ids.lock().unwrap();
@@ -151,17 +233,37 @@ impl Broker {
         Ok(())
     }
 
+    /// Rolls back the current transaction.
+    ///
+    /// This method clears the transaction log.
     pub fn rollback_transaction(&self) {
         let mut log = self.transaction_log.lock().unwrap();
         log.clear();
     }
 
+    /// Sends a message to the broker.
+    ///
+    /// This method adds the message to the transaction messages.
+    ///
+    /// # Arguments
+    /// * `message` - The message to send.
+    ///
+    /// # Returns
+    /// An empty result if the message is sent successfully.
     pub fn send_message(&self, message: Message) -> Result<(), String> {
         let mut messages = self.transaction_messages.lock().unwrap();
         messages.push(message);
         Ok(())
     }
 
+    /// Receives a message from the broker.
+    ///
+    /// This method returns the next message in the message queue.
+    ///
+    /// If the message has already been processed, it is not returned.
+    ///
+    /// # Returns
+    /// An optional message if one is available.
     pub fn receive_message(&self) -> Option<Message> {
         if let Some(message) = self.message_queue.receive() {
             let mut processed_ids = self.processed_message_ids.lock().unwrap();
@@ -176,6 +278,17 @@ impl Broker {
         }
     }
 
+    /// Sends a message to the broker and waits for an ACK.
+    ///
+    /// # Arguments
+    /// * `message` - The message to send.
+    /// * `timeout_duration` - The duration to wait for an ACK.
+    ///
+    /// # Returns
+    /// The ACK for the message if it is received within the timeout duration.
+    ///
+    /// # Errors
+    /// An error if the ACK is not received within the timeout duration.
     pub async fn send_message_with_ack(
         &self,
         message: Message,
@@ -189,6 +302,16 @@ impl Broker {
         }
     }
 
+    /// Waits for an ACK for the specified message.
+    ///
+    /// # Arguments
+    /// * `message_id` - The ID of the message to wait for an ACK.
+    ///
+    /// # Returns
+    /// The ACK for the message if it is received.
+    ///
+    /// # Errors
+    /// An error if the ACK is not received.
     async fn wait_for_ack(&self, message_id: Uuid) -> Result<MessageAck, String> {
         let (tx, rx) = oneshot::channel();
 
@@ -203,6 +326,15 @@ impl Broker {
         }
     }
 
+    /// Receives an ACK for the specified message.
+    ///
+    /// This method removes the ACK from the ACK waiters.
+    ///
+    /// # Arguments
+    /// * `ack` - The ACK to receive.
+    ///
+    /// # Returns
+    /// An empty result if the ACK is received successfully.
     pub fn receive_ack(&self, ack: MessageAck) {
         let mut ack_waiters = self.ack_waiters.lock().unwrap();
         if let Some(tx) = ack_waiters.remove(&ack.message_id) {
@@ -210,6 +342,34 @@ impl Broker {
         }
     }
 
+    /// Performs an operation with retry.
+    ///
+    /// This method performs the specified operation with retry.
+    ///
+    /// # Arguments
+    /// * `operation` - The operation to perform.
+    /// * `max_retries` - The maximum number of retries.
+    /// * `delay` - The delay between retries.
+    ///
+    /// # Returns
+    /// The result of the operation if it is successful.
+    ///
+    /// # Errors
+    /// An error if the operation fails after the maximum number of retries.
+    ///
+    /// # Examples
+    /// ```
+    /// use pilgrimage::broker::Broker;
+    /// use std::time::Duration;
+    ///
+    /// let broker = Broker::new("broker1", 3, 2, "logs");
+    /// let result = broker.perform_operation_with_retry(|| {
+    ///     Ok(42)
+    /// }, 3, Duration::from_secs(1));
+    ///
+    /// // Check the result
+    /// assert_eq!(result.unwrap(), 42);
+    /// ```
     pub fn perform_operation_with_retry<F, T, E>(
         &self,
         operation: F,
@@ -235,6 +395,16 @@ impl Broker {
         }
     }
 
+    /// Checks if the broker is healthy.
+    ///
+    /// This method checks the health of the broker by performing various checks:
+    /// - Storage health check
+    /// - Node health check
+    /// - Message queue status check
+    /// - Leader election status check
+    ///
+    /// # Returns
+    /// A boolean value indicating whether the broker is healthy.
     pub fn is_healthy(&self) -> bool {
         // Storage Health Check
         if let Ok(storage) = self.storage.lock() {
@@ -273,6 +443,13 @@ impl Broker {
         true
     }
 
+    /// Replicates data to the specified partition.
+    ///
+    /// This method replicates the specified data to the partition with the specified ID.
+    ///
+    /// # Arguments
+    /// * `partition_id` - The ID of the partition to replicate the data to.
+    /// * `data` - The data to replicate.
     pub fn replicate_data(&self, partition_id: &str, data: &[u8]) {
         let replicas = self.replicas.lock().unwrap();
         if let Some(nodes) = replicas.get(partition_id) {
@@ -289,6 +466,11 @@ impl Broker {
         }
     }
 
+    /// Monitors the nodes in the cluster.
+    ///
+    /// This method monitors the nodes in the cluster and checks their health
+    /// ([`check_node_health`]).
+    /// If a node is not healthy, it is recovered ([`recover_node`]).
     fn monitor_nodes(&self) {
         let storage = self.storage.clone();
         let consumer_groups = self.consumer_groups.clone();
@@ -305,6 +487,15 @@ impl Broker {
         });
     }
 
+    /// Detects a node failure and initiates fail-over.
+    ///
+    /// This method detects a node failure and initiates fail-over by:
+    /// 1. Removing the node from the cluster.
+    /// 2. Rebalancing the partitions.
+    /// 3. Starting a new leader election.
+    ///
+    /// # Arguments
+    /// * `node_id` - The ID of the failed node.
     pub fn detect_failure(&self, node_id: &str) {
         let mut nodes = self.nodes.lock().unwrap();
         if nodes.remove(node_id).is_some() {
@@ -315,6 +506,13 @@ impl Broker {
         }
     }
 
+    /// Adds a node to the cluster.
+    ///
+    /// This method adds a node to the cluster and rebalances the partitions.
+    ///
+    /// # Arguments
+    /// * `node_id` - The ID of the node to add.
+    /// * `node` - The node to add.
     pub fn add_node(&self, node_id: String, node: Node) {
         let mut nodes = self.nodes.lock().unwrap();
         nodes.insert(node_id, node);
@@ -322,6 +520,12 @@ impl Broker {
         self.rebalance_partitions();
     }
 
+    /// Removes a node from the cluster.
+    ///
+    /// This method removes a node from the cluster and rebalances the partitions.
+    ///
+    /// # Arguments
+    /// * `node_id` - The ID of the node to remove.
     pub fn remove_node(&self, node_id: &str) {
         let mut nodes = self.nodes.lock().unwrap();
         nodes.remove(node_id);
@@ -329,6 +533,10 @@ impl Broker {
         self.rebalance_partitions();
     }
 
+    /// Rebalances the partitions in the cluster.
+    ///
+    /// This method rebalances the partitions in the cluster by assigning each partition to a node.
+    /// The partitions are assigned to nodes in a round-robin fashion.
     pub fn rebalance_partitions(&self) {
         let nodes = self.nodes.lock().unwrap();
         let num_nodes = nodes.len();
@@ -345,6 +553,12 @@ impl Broker {
         }
     }
 
+    /// Starts a new leader election.
+    ///
+    /// This method starts a new leader election by electing a new leader.
+    ///
+    /// # Returns
+    /// A boolean value indicating whether a new leader was elected.
     pub fn start_election(&self) -> bool {
         let nodes = self.nodes.lock().unwrap();
         if let Some((new_leader, _)) = nodes.iter().next() {
@@ -356,10 +570,26 @@ impl Broker {
         false
     }
 
+    /// Checks if the broker is the leader.
+    ///
+    /// # Returns
+    /// A boolean value indicating whether the broker is the leader.
     pub fn is_leader(&self) -> bool {
         *self.leader_election.state.lock().unwrap() == BrokerState::Leader
     }
 
+    /// Creates a new topic with the specified name and number of partitions.
+    ///
+    /// # Arguments
+    /// * `name` - The name of the topic.
+    /// * `num_partitions` - The number of partitions for the topic.
+    ///   If not provided, the default number of partitions is used.
+    ///
+    /// # Returns
+    /// An empty result if the topic is created successfully.
+    ///
+    /// # Errors
+    /// An error if the topic already exists.
     pub fn create_topic(
         &mut self,
         name: &str,
@@ -378,6 +608,22 @@ impl Broker {
         Ok(())
     }
 
+    /// Subscribes a consumer to the specified topic.
+    ///
+    /// If a group ID is provided, the consumer is added to the consumer group.
+    /// Otherwise, the consumer is added as a subscriber to the topic.
+    ///
+    /// # Arguments
+    /// * `topic_name` - The name of the topic to subscribe to.
+    /// * `subscriber` - The subscriber to add.
+    /// * `group_id` - The ID of the consumer group to add the consumer to.
+    ///   If not provided, the consumer is added as a subscriber.
+    ///
+    /// # Returns
+    /// An empty result if the subscriber is added successfully.
+    ///
+    /// # Errors
+    /// An error if the topic is not found.
     pub fn subscribe(
         &mut self,
         topic_name: &str,
@@ -403,6 +649,24 @@ impl Broker {
         }
     }
 
+    /// Publishes a message to the specified topic sending an ACK.
+    ///
+    /// An ACK is sent to the publisher after the message is published.
+    ///
+    /// If a key is provided, the message is partitioned based on the key.
+    ///
+    /// # Arguments
+    /// * `topic_name` - The name of the topic to publish the message to.
+    /// * `message` - The message to publish.
+    /// * `key` - The key to use for partitioning the message.
+    ///   If not specified, the message is published to the partition selected
+    ///   based on the current system time (see also [`Topic::publish`]).
+    ///
+    /// # Returns
+    /// The ACK for the message if it is published successfully.
+    ///
+    /// # Errors
+    /// An error if the topic is not found.
     pub async fn publish_with_ack(
         &mut self,
         topic_name: &str,
@@ -437,6 +701,9 @@ impl Broker {
         }
     }
 
+    /// Rotates the log file.
+    ///
+    /// This method compresses the log file and creates a new log file.
     pub fn rotate_logs(&self) {
         let log_path = Path::new(&self.log_path);
         let rotated = log_path.with_extension("old");
@@ -448,6 +715,16 @@ impl Broker {
         }
     }
 
+    /// Writes a message to the log file.
+    ///
+    /// # Arguments
+    /// * `message` - The message to write to the log file.
+    ///
+    /// # Returns
+    /// An empty result if the message is written successfully.
+    ///
+    /// # Errors
+    /// An error if the message cannot be written to the log file.
     pub fn write_log(&self, message: &str) -> std::io::Result<()> {
         let mut file = std::fs::OpenOptions::new()
             .append(true)
@@ -457,17 +734,33 @@ impl Broker {
         Ok(())
     }
 
+    /// Cleans up the log files.
+    ///
+    /// This method cleans up the old log files.
+    ///
+    /// # Returns
+    /// An empty result if the log files are cleaned up successfully.
+    ///
+    /// # Errors
+    /// An error if the log files cannot be cleaned up.
     pub fn cleanup_logs(&self) -> Result<(), BrokerError> {
         self.storage.lock().unwrap().cleanup_logs()?;
         Ok(())
     }
 }
 
+/// The `Node` struct represents a node in the cluster.
+///
+/// It contains various fields related to the node, such as its ID, address, and data.
 #[derive(Clone)]
 pub struct Node {
+    /// The unique identifier of the node.
     pub id: String,
+    /// The address of the node.
     pub address: String,
+    /// A boolean value indicating whether the node is active.
     pub is_active: bool,
+    /// The data stored on the node.
     pub data: Arc<Mutex<Vec<u8>>>,
 }
 
@@ -482,7 +775,13 @@ impl Node {
     }
 }
 
+/// The `Shard` struct represents a shard in the cluster.
+///
+/// It contains the ID of the node that the shard is assigned to.
+///
+/// Shards are used to partition the data in the cluster.
 pub struct Shard {
+    /// The ID of the node that the shard is assigned to.
     pub node_id: String,
 }
 
@@ -498,6 +797,7 @@ mod tests {
     use std::time::Duration;
     use tempfile::tempdir;
 
+    /// Utility function to create a test broker.
     fn create_test_broker() -> Broker {
         let temp_dir = tempdir().unwrap();
         let storage_path = temp_dir
@@ -529,6 +829,7 @@ mod tests {
         }
     }
 
+    /// Utility function to create a test node.
     fn create_test_node(id: &str) -> Node {
         Node {
             id: id.to_string(),
@@ -538,6 +839,7 @@ mod tests {
         }
     }
 
+    /// Utility function to create a test broker with a log path.
     fn create_test_broker_with_path(log_path: &str) -> Broker {
         Broker {
             consumer_groups: Arc::new(Mutex::new(HashMap::new())),
@@ -561,10 +863,12 @@ mod tests {
         }
     }
 
+    /// Utility function to set up test logs.
     fn setup_test_logs(path: &str) {
         cleanup_test_logs(path);
     }
 
+    /// Utility function to clean up test logs.
     fn cleanup_test_logs(path: &str) {
         if Path::new(path).exists() {
             let _ = fs::remove_file(path);
@@ -575,6 +879,16 @@ mod tests {
         }
     }
 
+    /// Tests the creation of a node.
+    ///
+    /// # Purpose
+    /// Tests that a node can be created with the specified ID, address, and active status.
+    ///
+    /// # Steps
+    /// 1. Create a new node with the ID "node1", address "127.0.0.1:8080", and active status.
+    /// 2. Check that the node ID is "node1".
+    /// 3. Check that the node address is "127.0.0.1:8080".
+    /// 4. Check that the node is active.
     #[test]
     fn test_node_creation() {
         let node = Node::new("node1", "127.0.0.1:8080", true);
@@ -583,6 +897,19 @@ mod tests {
         assert!(node.is_active);
     }
 
+    /// Tests log rotation and cleanup.
+    ///
+    /// # Purpose
+    /// Tests that the log file can be rotated and cleaned up.
+    ///
+    /// # Steps
+    /// 1. Create a temporary directory.
+    /// 2. Create a new storage instance with the temporary directory path.
+    /// 3. Attempt to rotate the logs.
+    /// 4. Check that the log rotation fails because the old log file does not exist.
+    /// 5. Create an old log file.
+    /// 6. Attempt to rotate the logs.
+    /// 7. Check that the log rotation succeeds.
     #[test]
     fn test_log_rotation_and_cleanup() {
         let temp_dir = tempdir().unwrap();
@@ -606,6 +933,18 @@ mod tests {
         );
     }
 
+    /// Tests the creation of a broker.
+    ///
+    /// # Purpose
+    /// Tests that a broker can be created with the specified ID,
+    /// number of partitions, replication factor, and storage path.
+    ///
+    /// # Steps
+    /// 1. Create a new broker with the ID "broker1", 3 partitions, 2 replicas,
+    ///    and "logs" storage path.
+    /// 2. Check that the broker ID is "broker1".
+    /// 3. Check that the number of partitions is 3.
+    /// 4. Check that the replication factor is 2.
     #[test]
     fn test_broker_creation() {
         let test_log = "test_logs_creation";
@@ -619,6 +958,16 @@ mod tests {
         cleanup_test_logs(test_log);
     }
 
+    /// Tests the creation of a topic.
+    ///
+    /// # Purpose
+    /// Tests that a topic can be created with the specified name and number of partitions.
+    ///
+    /// # Steps
+    /// 1. Create a new broker with the ID "broker1", 3 partitions, 2 replicas,
+    ///    and "logs" storage path.
+    /// 2. Create a new topic "test_topic" with 3 partitions (default).
+    /// 3. Check that the topic is created successfully.
     #[test]
     fn test_create_topic() {
         let test_log = "test_logs_topic";
@@ -631,6 +980,19 @@ mod tests {
         cleanup_test_logs(test_log);
     }
 
+    /// Tests the subscription of a consumer to a topic and the publication of a message.
+    ///
+    /// # Purpose
+    /// Tests that a consumer can subscribe to a topic and receive a published message.
+    ///
+    /// # Steps
+    /// 1. Create a new broker with the ID "broker1", 3 partitions, 2 replicas,
+    ///    and "logs" storage path.
+    /// 2. Create a new topic "test_topic" with 3 partitions (default).
+    /// 3. Create a new subscriber "test_consumer" that prints the received message.
+    /// 4. Subscribe the subscriber to the topic.
+    /// 5. Publish a message to the topic.
+    /// 6. Check that the message is received by the subscriber.
     #[tokio::test]
     async fn test_subscribe_and_publish() {
         let mut broker = create_test_broker();
@@ -668,6 +1030,21 @@ mod tests {
         }
     }
 
+    /// Tests the distribution of messages to a consumer group.
+    ///
+    /// # Purpose
+    /// Tests that messages are distributed to consumers in a consumer group.
+    ///
+    /// # Steps
+    /// 1. Create a temporary directory to store the test storage.
+    /// 2. Create a new broker with the ID "broker1", 3 partitions, 2 replicas,
+    ///    and the test storage path.
+    /// 3. Create a new topic "test_topic" with 3 partitions (default).
+    /// 4. Create a new subscriber "consumer_1" that increments a counter for each message received.
+    ///    And subscribe the subscriber to the topic.
+    /// 5. Publish 10 messages to the topic.
+    /// 6. Wait for 1 second and
+    ///    check that the number of messages processed matches the number of messages published.
     #[tokio::test]
     async fn test_consumer_group_message_distribution() {
         let temp_dir = tempdir().unwrap();
@@ -706,6 +1083,17 @@ mod tests {
         );
     }
 
+    /// Tests the replication of data to a partition.
+    ///
+    /// # Purpose
+    /// Tests that data can be replicated to a partition.
+    ///
+    /// # Steps
+    /// 1. Create a new broker with the ID "broker1", 3 partitions, 2 replicas,
+    ///    and "logs" storage path.
+    /// 2. Replicate data to partition 1.
+    /// 3. Check that the data is replicated to the correct node.
+    /// 4. Check that the data is not replicated to non-existent nodes.
     #[test]
     fn test_data_replication() {
         let broker = create_test_broker();
@@ -730,6 +1118,20 @@ mod tests {
         assert!(node_index < nodes.len(), "Node index is out of range.");
     }
 
+    /// Tests the fail-over mechanism.
+    ///
+    /// # Purpose
+    /// Tests that the fail-over mechanism works correctly when a node fails.
+    ///
+    /// # Steps
+    /// 1. Create a new broker with the ID "broker1", 3 partitions, 2 replicas,
+    ///    and "logs" storage path.
+    /// 2. Create two test nodes "node1" and "node2".
+    /// 3. Add the nodes to the broker.
+    /// 4. Set "node1" as the leader.
+    /// 5. Detect the failure of "node1".
+    /// 6. Check that "node1" is removed from the cluster.
+    /// 7. Check that "node2" is the new leader.
     #[test]
     fn test_failover() {
         let broker = Broker::new("broker1", 3, 2, "logs");
@@ -754,6 +1156,16 @@ mod tests {
         assert_eq!(leader.as_deref(), Some("node2"));
     }
 
+    /// Tests the rebalancing of partitions.
+    ///
+    /// # Purpose
+    /// Tests that the partitions are rebalanced correctly when a node is added or removed.
+    ///
+    /// # Steps
+    /// 1. Create a new broker with the ID "broker1", 3 partitions, 2 replicas,
+    ///    and "logs" storage path.
+    /// 2. Insert three shards in three partitions.
+    /// 3. Check that the first partition is assigned to node1.
     #[test]
     fn test_rebalance() {
         let _broker = create_test_broker();
@@ -776,6 +1188,18 @@ mod tests {
         assert!(partitions.contains_key("0"), "Partition 0 does not exist.");
     }
 
+    /// Tests the addition of an existing node.
+    ///
+    /// # Purpose
+    /// Tests that adding an existing node does not create a duplicate node.
+    ///
+    /// # Steps
+    /// 1. Create a new broker with the ID "broker1", 3 partitions, 2 replicas,
+    ///    and "logs" storage path.
+    /// 2. Create a test node "node1".
+    /// 3. Add the node to the broker.
+    /// 4. Add the node to the broker again.
+    /// 5. Check that only one node is added.
     #[test]
     fn test_add_existing_node() {
         let broker = Broker::new("broker1", 3, 2, "logs");
@@ -788,6 +1212,16 @@ mod tests {
         assert_eq!(nodes.len(), 1);
     }
 
+    /// Tests the removal of a non-existent node.
+    ///
+    /// # Purpose
+    /// Tests that removing a non-existent node does not cause an error.
+    ///
+    /// # Steps
+    /// 1. Create a new broker with the ID "broker1", 3 partitions, 2 replicas,
+    ///    and "logs" storage path.
+    /// 2. Remove a non-existent node.
+    /// 3. Check that no nodes are present in the broker.
     #[test]
     fn test_remove_nonexistent_node() {
         let broker = Broker::new("broker1", 3, 2, "logs");
@@ -797,6 +1231,16 @@ mod tests {
         assert_eq!(nodes.len(), 0);
     }
 
+    /// Tests the replication of data to non-existent nodes.
+    ///
+    /// # Purpose
+    /// Tests that data is not replicated to non-existent nodes.
+    ///
+    /// # Steps
+    /// 1. Create a new broker with the ID "broker1", 3 partitions, 2 replicas,
+    ///    and "logs" storage path.
+    /// 2. Replicate data to a non-existent node.
+    /// 3. Check that the data is not replicated to any nodes.
     #[test]
     fn test_replicate_to_nonexistent_node() {
         let broker = create_test_broker();
@@ -812,6 +1256,16 @@ mod tests {
         );
     }
 
+    /// Tests the election of a leader with no nodes.
+    ///
+    /// # Purpose
+    /// Tests that a leader election fails when there are no nodes in the cluster.
+    ///
+    /// # Steps
+    /// 1. Create a new broker with the ID "broker1", 3 partitions, 2 replicas,
+    ///    and "logs" storage path.
+    /// 2. Start a new leader election.
+    /// 3. Check that the leader election fails.
     #[test]
     fn test_election_with_no_nodes() {
         let broker = Broker::new("broker1", 3, 2, "logs");
@@ -820,6 +1274,18 @@ mod tests {
         assert!(!elected);
     }
 
+    /// Tests adding an invalid node.
+    ///
+    /// # Purpose
+    /// Tests that adding an invalid node does not create a duplicate node.
+    ///
+    /// # Steps
+    /// 1. Create a new broker with the ID "broker1", 3 partitions, 2 replicas,
+    ///    and "logs" storage path.
+    /// 2. Create a test node "node1".
+    /// 3. Add the node to the broker.
+    /// 4. Add the node to the broker again.
+    /// 5. Check that only one node is added.
     #[test]
     fn test_add_invalid_node() {
         let broker = Broker::new("broker1", 3, 2, "logs");
@@ -832,6 +1298,16 @@ mod tests {
         assert_eq!(nodes.len(), 1, "Duplicate nodes should not be added.");
     }
 
+    /// Tests electing a leader with no nodes.
+    ///
+    /// # Purpose
+    /// Tests that a leader election fails when there are no nodes in the cluster.
+    ///
+    /// # Steps
+    /// 1. Create a new broker with the ID "broker1", 3 partitions, 2 replicas,
+    ///    and "logs" storage path.
+    /// 2. Start a new leader election.
+    /// 3. Check that the leader election fails.
     #[test]
     fn test_elect_leader_with_no_nodes() {
         let broker = Broker::new("broker1", 3, 2, "logs");
@@ -842,6 +1318,16 @@ mod tests {
         );
     }
 
+    /// Tests replicating data to non-existent nodes.
+    ///
+    /// # Purpose
+    /// Tests that data is not replicated to non-existent nodes.
+    ///
+    /// # Steps
+    /// 1. Create a new broker with the ID "broker1", 3 partitions, 2 replicas,
+    ///    and "logs" storage path.
+    /// 2. Replicate data to non-existent nodes.
+    /// 3. Check that the data is not replicated to any nodes.
     #[tokio::test]
     async fn test_replicate_to_nonexistent_nodes() {
         let broker = create_test_broker();
@@ -873,6 +1359,17 @@ mod tests {
         }
     }
 
+    /// Tests the rotation of logs.
+    ///
+    /// # Purpose
+    /// Tests that the log file can be rotated successfully.
+    ///
+    /// # Steps
+    /// 1. Create a temporary directory.
+    /// 2. Create a new log file in the temporary directory.
+    /// 3. Create a new broker with the log file path.
+    /// 4. Rotate the logs.
+    /// 5. Check that the log file is rotated successfully.
     #[test]
     fn test_rotate_logs() {
         let dir = tempdir().unwrap();
@@ -895,12 +1392,31 @@ mod tests {
         assert!(new_log_content.is_empty());
     }
 
+    /// Tests the rotation of logs with an invalid path.
+    ///
+    /// # Purpose
+    /// Tests that the log file cannot be rotated with an invalid path.
+    ///
+    /// # Steps
+    /// 1. Create a new broker with an invalid log file path.
+    /// 2. Rotate the logs.
     #[test]
     fn test_rotate_logs_invalid_path() {
         let broker = create_test_broker_with_path("/invalid/path/test.log");
         broker.rotate_logs();
     }
 
+    /// Tests the rotation of logs with no permissions.
+    ///
+    /// # Purpose
+    /// Tests that the log file cannot be rotated with no permissions.
+    ///
+    /// # Steps
+    /// 1. Create a temporary directory.
+    /// 2. Create a new log file in the temporary directory.
+    /// 3. Set the permissions of the log file to read-only.
+    /// 4. Create a new broker with the log file path.
+    /// 5. Rotate the logs.
     #[test]
     fn test_rotate_logs_no_permissions() {
         let dir = tempdir().unwrap();
@@ -921,6 +1437,15 @@ mod tests {
         broker.rotate_logs();
     }
 
+    /// Tests rotating logs with a file not found.
+    ///
+    /// # Purpose
+    /// Tests that the log file cannot be rotated if it does not exist.
+    ///
+    /// # Steps
+    /// 1. Create a temporary directory.
+    /// 2. Create a new broker with a non-existent log file path.
+    /// 3. Rotate the logs.
     #[test]
     fn test_rotate_logs_file_not_found() {
         let dir = tempdir().unwrap();
@@ -930,6 +1455,16 @@ mod tests {
         broker.rotate_logs();
     }
 
+    /// Tests rotating logs with a file in use.
+    ///
+    /// # Purpose
+    /// Tests that the log file cannot be rotated if it is in use.
+    ///
+    /// # Steps
+    /// 1. Create a temporary directory.
+    /// 2. Create a new log file in the temporary directory.
+    /// 3. Open the log file.
+    /// 4. Check that the log file exists.
     #[test]
     fn test_rotate_logs_file_in_use() {
         let temp_dir = tempdir().unwrap();
@@ -946,6 +1481,17 @@ mod tests {
         assert!(file_path.exists());
     }
 
+    /// Tests writing a log message.
+    ///
+    /// # Purpose
+    /// Tests that a log message can be written to the log file.
+    ///
+    /// # Steps
+    /// 1. Create a temporary directory.
+    /// 2. Create a new log file in the temporary directory.
+    /// 3. Create a new broker with the log file path.
+    /// 4. Write a log message to the log file.
+    /// 5. Check that the log message is written to the log file.
     #[test]
     fn test_write_log() {
         let dir = tempdir().unwrap();
@@ -962,6 +1508,15 @@ mod tests {
         assert!(content.contains("Test message 2"));
     }
 
+    /// Tests writing a log message with an invalid path.
+    ///
+    /// # Purpose
+    /// Tests that an error is returned when writing a log message with an invalid path.
+    ///
+    /// # Steps
+    /// 1. Create a new broker with an invalid log file path.
+    /// 2. Write a log message to the log file.
+    /// 3. Check that an error is returned.
     #[test]
     fn test_write_log_invalid_path() {
         let dir = tempdir().unwrap();
@@ -973,6 +1528,18 @@ mod tests {
         assert!(result.is_err());
     }
 
+    /// Tests writing a log message with no permissions.
+    ///
+    /// # Purpose
+    /// Tests that an error is returned when writing a log message with no permissions.
+    ///
+    /// # Steps
+    /// 1. Create a temporary directory.
+    /// 2. Create a new log file in the temporary directory.
+    /// 3. Set the permissions of the log file to read-only.
+    /// 4. Create a new broker with the log file path.
+    /// 5. Write a log message to the log file.
+    /// 6. Check that an error is returned.
     #[test]
     fn test_write_log_no_permissions() {
         use std::os::unix::fs::PermissionsExt;
@@ -992,6 +1559,14 @@ mod tests {
         assert!(result.is_err());
     }
 
+    /// Tests rotating logs with an invalid storage path.
+    ///
+    /// # Purpose
+    /// Tests that the log file cannot be rotated with an invalid storage path.
+    ///
+    /// # Steps
+    /// 1. Create a new storage instance with an invalid path.
+    /// 2. Check that operations on the storage instance fail.
     #[test]
     fn test_rotate_logs_with_invalid_storage() {
         let storage_result = Storage::new("/invalid/path/to/storage");
@@ -1001,6 +1576,16 @@ mod tests {
         );
     }
 
+    /// Tests multi-threaded message processing.
+    ///
+    /// # Purpose
+    /// Tests that messages can be processed concurrently by multiple threads.
+    ///
+    /// # Steps
+    /// 1. Create a new broker.
+    /// 2. Create a counter to track the number of processed messages.
+    /// 3. Create 10 messages and spawn a new thread for each message.
+    /// 4. Check that all messages are processed.
     #[tokio::test]
     async fn test_multithreaded_message_processing() {
         let broker = Arc::new(create_test_broker());
@@ -1035,6 +1620,16 @@ mod tests {
         );
     }
 
+    /// Tests the rotation of logs with an error message.
+    ///
+    /// # Purpose
+    /// Tests that an error message is returned when the log file cannot be rotated.
+    ///
+    /// # Steps
+    /// 1. Create a temporary directory.
+    /// 2. Create a new storage instance with the temporary directory path.
+    /// 3. Attempt to rotate the logs.
+    /// 4. Check that an error message is returned and formatted correctly.
     #[test]
     fn test_log_rotation_error_message() {
         let temp_dir = tempdir().unwrap();
@@ -1057,6 +1652,17 @@ mod tests {
         }
     }
 
+    /// Tests writing and reading messages.
+    ///
+    /// # Purpose
+    /// Tests that messages can be written to and read from storage.
+    ///
+    /// # Steps
+    /// 1. Create a temporary directory.
+    /// 2. Create a new storage instance with the temporary directory path.
+    /// 3. Write two messages to storage.
+    /// 4. Read the messages from storage.
+    /// 5. Check that the messages are read correctly.
     #[test]
     fn test_write_and_read_messages() {
         let temp_dir = tempdir().unwrap();
@@ -1077,6 +1683,15 @@ mod tests {
         assert_eq!(messages[1], "test_message_2");
     }
 
+    /// Tests operation success on the first try.
+    ///
+    /// # Purpose
+    /// Tests that an operation succeeds on the first try.
+    ///
+    /// # Steps
+    /// 1. Create a new broker.
+    /// 2. Perform an operation that succeeds on the first try.
+    /// 3. Check that the operation is successful.
     #[test]
     fn test_perform_operation_with_retry_success_on_first_try() {
         let broker = create_test_broker();
@@ -1090,6 +1705,15 @@ mod tests {
         assert_eq!(result.unwrap(), "Success");
     }
 
+    /// Tests operation success after retries.
+    ///
+    /// # Purpose
+    /// Tests whether an operation succeeds within the specified number of retries.
+    ///
+    /// # Steps
+    /// 1. Create a new broker.
+    /// 2. Perform an operation that succeeds after multiple retries.
+    /// 3. Check that the operation is successful.
     #[test]
     fn test_perform_operation_with_retry_success_after_retries() {
         let broker = create_test_broker();
@@ -1115,6 +1739,15 @@ mod tests {
         assert_eq!(*counter.lock().unwrap(), 3);
     }
 
+    /// Tests operation failure after retries.
+    ///
+    /// # Purpose
+    /// Tests if an operation fails after reaching the maximum number of retries.
+    ///
+    /// # Steps
+    /// 1. Create a new broker.
+    /// 2. Perform an operation that fails after multiple retries.
+    /// 3. Check that the operation fails.
     #[test]
     fn test_perform_operation_with_retry_failure_after_max_retries() {
         let broker = create_test_broker();
@@ -1136,6 +1769,18 @@ mod tests {
         assert_eq!(*counter.lock().unwrap(), 4);
     }
 
+    /// Tests the ordering of messages.
+    ///
+    /// # Purpose
+    /// Tests that messages are received in the correct order.
+    ///
+    /// # Steps
+    /// 1. Create a new broker.
+    /// 2. Create a new topic.
+    /// 3. Create a subscriber that appends messages to a vector.
+    /// 4. Subscribe the subscriber to the topic.
+    /// 5. Publish three messages to the topic.
+    /// 6. Check that the messages are received in the correct order.
     #[tokio::test]
     async fn test_message_ordering() {
         let mut broker = create_test_broker();
@@ -1153,7 +1798,6 @@ mod tests {
         );
         broker.subscribe(topic, subscriber, None).unwrap();
 
-        // メッセージ送信
         let expected_messages = vec!["message1", "message2", "message3"];
         for msg in &expected_messages {
             broker
@@ -1180,6 +1824,19 @@ mod tests {
         }
     }
 
+    /// Tests the distribution of messages to partitions.
+    ///
+    /// # Purpose
+    /// Tests that messages are distributed to partitions correctly.
+    ///
+    /// # Steps
+    /// 1. Create a new broker.
+    /// 2. Create a new topic with three partitions.
+    /// 3. Create a subscriber that appends messages to a vector.
+    /// 4. Subscribe the subscriber to the topic.
+    /// 5. Publish 10 messages to the topic.
+    /// 6. Check that all messages are received.
+    /// 7. Check that the number of partitions matches the expected number.
     #[tokio::test]
     async fn test_partition_distribution() {
         let mut broker = create_test_broker();
