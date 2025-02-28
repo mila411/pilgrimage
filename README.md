@@ -20,9 +20,42 @@
     </a>
 </p>
 
-# pilgrimage
+<h1>pilgrimage</h1>
 
 Pilgrimage is a Rust implementation of a distributed messaging system inspired by Apache Kafka. It records messages to local files and supports **At-least-once** and **Exactly-once** delivery semantics.
+
+--------------------
+
+<h2>Table of contents</h2>
+
+- [Installation](#installation)
+- [Security](#security)
+- [Features](#features)
+- [Basic Usage](#basic-usage)
+  - [Dependency](#dependency)
+  - [Functionality Implemented](#functionality-implemented)
+  - [Examples](#examples)
+  - [Bench](#bench)
+- [CLI Features](#cli-features)
+  - [start](#start)
+  - [stop](#stop)
+  - [send](#send)
+  - [consume](#consume)
+  - [status](#status)
+  - [Additional Information](#additional-information)
+  - [Running the CLI](#running-the-cli)
+- [Web Console API](#web-console-api)
+  - [Available Endpoints](#available-endpoints)
+    - [Start Broker](#start-broker)
+    - [Stop Broker](#stop-broker)
+    - [Send Message](#send-message)
+    - [Consume Messages](#consume-messages)
+    - [Check Status](#check-status)
+  - [Running the Web Server](#running-the-web-server)
+- [Version increment on release](#version-increment-on-release)
+  - [License](#license)
+
+--------------------
 
 ## Installation
 
@@ -33,9 +66,13 @@ To use Pilgrimage, add the following to your `Cargo.toml`:
 pilgrimage = "0.12"
 ```
 
+--------------------
+
 ## Security
 
 When using Pilgramage as a Crate, client authentication is implemented, but at present, authentication is not implemented for message sending and receiving from the CLI and web client. You can find a sample of authentication with Crate `examples/auth-example.rs`, `examples/auth-send-recv.rs`.
+
+--------------------
 
 ## Features
 
@@ -57,6 +94,8 @@ When using Pilgramage as a Crate, client authentication is implemented, but at p
 - CLI based console
 - WEB based console
 - Support AMQP
+
+--------------------
 
 ## Basic Usage
 
@@ -166,7 +205,12 @@ Found 2 outliers among 100 measurements (2.00%)
   2 (2.00%) high mild
 ```
 
-`cargo bench`
+To run the benchmark on your local machine, use the command:
+```bash
+cargo bench
+```
+
+--------------------
 
 ## CLI Features
 
@@ -285,6 +329,8 @@ To start the web server:
 ```sh
 cargo run --bin pilgrimage
 ```
+
+--------------------
 
 ## Web Console API
 

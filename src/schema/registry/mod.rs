@@ -1,20 +1,69 @@
+//! Module containing the schema registry.
+//!
+//! The schema registry is responsible for managing schemas for different topics.
+//!
+//! Each topic can have multiple schemas, and the schema registry keeps track of the schema versions.
+//!
+//! # Example
+//! The following example demonstrates how to create a new schema registry.
+//! ```
+//! use pilgrimage::schema::registry::SchemaRegistry;
+//!
+//! // Create a new schema registry
+//! let registry = SchemaRegistry::new();
+//!
+//! // Register a new schema
+//! let schema_def = r#"{"type":"record","name":"test","fields":[{"name":"id","type":"string"}]}"#;
+//! let result = registry.register_schema("test_topic", schema_def);
+//!
+//! // Check if the schema was successfully registered
+//! assert!(result.is_ok());
+//! ```
+
 use crate::schema::compatibility::Compatibility;
 use crate::schema::version::SchemaVersion;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
+/// Struct representing a schema.
+///
+/// A schema is a JSON object that defines the structure of data for a topic.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Schema {
+    /// The unique identifier for the schema. It is an unsigned 32-bit integer.
     pub id: u32,
+    /// The version of the schema ([`SchemaVersion`]).
     pub version: SchemaVersion,
+    /// The schema definition as a JSON string.
     pub definition: String,
 }
 
+/// Struct representing a schema registry.
+///
+/// The schema registry is responsible for managing schemas for different topics.
 /// Schema Registry Implementation
 /// Manage the schema version for each topic and perform compatibility checks.
+///
+/// # Examples
+/// The following example demonstrates how to create a new schema registry.
+/// ```
+/// use pilgrimage::schema::registry::SchemaRegistry;
+///
+/// // Create a new schema registry
+/// let registry = SchemaRegistry::new();
+///
+/// // Register a new schema
+/// let schema_def = r#"{"type":"record","name":"test","fields":[{"name":"id","type":"string"}]}"#;
+/// let result = registry.register_schema("test_topic", schema_def);
+///
+/// // Check if the schema was successfully registered
+/// assert!(result.is_ok());
+/// ```
 pub struct SchemaRegistry {
+    /// A map of topic names to a list of schemas.
     schemas: Arc<RwLock<HashMap<String, Vec<Schema>>>>,
+    /// The compatibility mode for the schema registry.
     compatibility: Compatibility,
 }
 
@@ -185,6 +234,16 @@ impl Default for SchemaRegistry {
 mod tests {
     use super::*;
 
+    /// Tests the registration of a new schema.
+    ///
+    /// # Purpose
+    /// This test ensures that a new schema can be successfully registered.
+    ///
+    /// # Steps
+    /// 1. Create a new schema registry.
+    /// 2. Register a new schema for a topic.
+    /// 3. Check if the schema was successfully registered.
+    /// 4. Verify the schema ID and version.
     #[test]
     fn test_schema_registration() {
         let registry = SchemaRegistry::default();
@@ -199,6 +258,17 @@ mod tests {
         assert_eq!(schema.version.major, 1);
     }
 
+    /// Tests the retrieval of a schema.
+    ///
+    /// # Purpose
+    /// This test ensures that a schema can be retrieved by topic and version.
+    ///
+    /// # Steps
+    /// 1. Create a new schema registry.
+    /// 2. Register a new schema for a topic.
+    /// 3. Check if the schema was successfully registered.
+    /// 4. Register another schema for the same topic.
+    /// 5. Check if the second schema was successfully registered.
     #[test]
     fn test_schema_compatibility() {
         let registry = SchemaRegistry::default();

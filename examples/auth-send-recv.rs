@@ -11,11 +11,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     authenticator.add_user("user1", "password1");
 
     let mut rbac = RoleBasedAccessControl::new();
-    rbac.add_role("admin", vec![
-        Permission::Read,
-        Permission::Write,
-        Permission::Admin,
-    ]);
+    rbac.add_role(
+        "admin",
+        vec![Permission::Read, Permission::Write, Permission::Admin],
+    );
     rbac.assign_role("user1", "admin");
 
     let token_manager = TokenManager::new(b"secret");

@@ -1,11 +1,40 @@
+//! Module for handling file I/O operations for the broker.
+//!
+//! The `Storage` struct provides methods to write messages to a file, read messages from a file,
+//! rotate logs, and clean up old logs.
+//!
+//! # Examples
+//! The following example demonstrates
+//! how to create a new storage instance and write a message to it:
+//! ```
+//! use pilgrimage::broker::storage::Storage;
+//!
+//! // Create a new storage instance
+//! let mut storage = Storage::new("general_test_log").unwrap();
+//!
+//! // Write a message to the storage
+//! storage.write_message("test_message").unwrap();
+//!
+//! // Read all messages from the storage
+//! let messages = storage.read_messages().unwrap();
+//! ```
+
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufRead, BufReader, BufWriter, Write};
 use std::path::Path;
 
+/// The `Storage` struct handles file I/O operations for the broker.
+///
+/// It provides methods to write messages to a file, read messages from a file,
+/// rotate logs, and clean up old logs.
+/// This is useful for persisting logs or any sequential data that needs to be stored reliably.
 #[derive(Debug)]
 pub struct Storage {
+    /// The file writer. This is a buffered writer that writes to the storage file.
     file: BufWriter<File>,
+    /// The path to the storage file.
     path: String,
+    /// A flag indicating whether the storage is available.
     pub available: bool,
 }
 
@@ -99,6 +128,29 @@ impl Storage {
         Ok(messages)
     }
 
+    /// Rotates the logs by processing the old log file.
+    ///
+    /// It checks for the existence of an old log file and processes it.
+    ///
+    /// # Returns
+    /// * `Ok(())` if the log rotation is successful.
+    /// * An `io::Error` if the old log file does not exist or an error occurs.
+    ///
+    /// # Errors
+    /// * If the old log file does not exist.
+    ///
+    /// # Examples
+    /// ```
+    /// use pilgrimage::broker::storage::Storage;
+    ///
+    /// // Create a new storage instance
+    /// let storage = Storage::new("test_rotate_logs").unwrap();
+    /// // Rotate the logs
+    /// let result = storage.rotate_logs();
+    ///
+    /// // Assert that the log rotation failed because the old log file does not exist
+    /// assert!(result.is_err());
+    /// ```
     pub fn rotate_logs(&self) -> io::Result<()> {
         // Log rotation process
         let old_log_path = format!("{}.old", self.path);
@@ -113,6 +165,29 @@ impl Storage {
         Ok(())
     }
 
+    /// Cleans up the old log file.
+    ///
+    /// This method deletes the old log file if it exists.
+    ///
+    /// # Returns
+    /// * `Ok(())` if the old log file is successfully deleted.
+    /// * An `io::Error` if the old log file does not exist or an error occurs.
+    ///
+    /// # Errors
+    /// * If the old log file does not exist.
+    ///
+    /// # Examples
+    /// ```
+    /// use pilgrimage::broker::storage::Storage;
+    ///
+    /// // Create a new storage instance
+    /// let storage = Storage::new("test_cleanup_logs").unwrap();
+    /// // Clean up the old log file
+    /// let result = storage.cleanup_logs();
+    ///
+    /// // Assert that the cleanup failed because the old log file does not exist
+    /// assert!(result.is_err());
+    /// ```
     pub fn cleanup_logs(&self) -> io::Result<()> {
         let old_path = format!("{}.old", self.path);
         if Path::new(&old_path).exists() {
@@ -126,10 +201,35 @@ impl Storage {
         Ok(())
     }
 
+    /// Checks if the storage is available.
+    ///
+    /// # Returns
+    /// * `true` if the storage is available.
+    /// * `false` if the storage is not available.
     pub fn is_available(&self) -> bool {
         self.available
     }
 
+    /// Reinitialize the storage by recreating the storage file.
+    ///
+    /// This method creates a new storage file and writes an initialization message to it.
+    ///
+    /// # Returns
+    /// * `Ok(())` if the storage is successfully reinitialized.
+    /// * An error message if the storage cannot be reinitialized.
+    ///
+    /// # Examples
+    /// ```
+    /// use pilgrimage::broker::storage::Storage;
+    ///
+    /// // Create a new storage instance
+    /// let mut storage = Storage::new("test_reinitialize").unwrap();
+    /// // Reinitialize the storage
+    /// let result = storage.reinitialize();
+    ///
+    /// // Assert that the storage is successfully reinitialized
+    /// assert!(result.is_ok());
+    /// ```
     pub fn reinitialize(&mut self) -> Result<(), String> {
         let file = File::create(&self.path).map_err(|e| e.to_string())?;
         self.file = BufWriter::new(file);
@@ -144,6 +244,14 @@ mod tests {
     use super::*;
     use std::path::Path;
 
+    /// Tests writing a message to an invalid path.
+    ///
+    /// # Purpose
+    /// This test verifies that writing a message to an invalid path returns an error.
+    ///
+    /// # Steps
+    /// 1. Create a new storage instance with an invalid path.
+    /// 2. Verify that the result is an error.
     #[test]
     fn test_write_message_to_invalid_path() {
         let invalid_path = "/invalid_path/test_logs";
@@ -151,6 +259,18 @@ mod tests {
         assert!(result.is_err());
     }
 
+    /// Tests reading messages from an invalid path.
+    ///
+    /// # Purpose
+    /// This test verifies that reading messages from an invalid path returns an error.
+    ///
+    /// # Steps
+    /// 1. Create a new filepath for the test log.
+    /// 2. Verify that the filepath does not exist.
+    /// 3. Create a new storage instance with the test log filepath.
+    /// 4. Remove the test log file.
+    /// 5. Attempt to read messages from the storage.
+    /// 6. Verify that the result is an error.
     #[test]
     fn test_read_message_from_nonexistent_file() {
         let test_log = format!("/tmp/test_log_{}", std::process::id());
@@ -167,6 +287,15 @@ mod tests {
         );
     }
 
+    /// Tests rotating logs with an invalid path.
+    ///
+    /// # Purpose
+    /// This test verifies that rotating logs with an invalid path returns an error.
+    ///
+    /// # Steps
+    /// 1. Create a new storage instance with an invalid path.
+    /// 2. Rotate the logs.
+    /// 3. Verify that the result is an error.
     #[test]
     fn test_rotate_logs_with_invalid_path() {
         let invalid_path = "/invalid_path/test_logs";
@@ -179,6 +308,17 @@ mod tests {
         assert!(result.is_err());
     }
 
+    /// Tests cleaning up logs with an invalid path.
+    ///
+    /// # Purpose
+    /// This test verifies that cleaning up logs with an invalid path returns an error.
+    ///
+    /// # Steps
+    /// 1. Create a new filepath for the test log.
+    /// 2. Verify that the filepath does not exist.
+    /// 3. Create a new storage instance with the test log filepath.
+    /// 4. Attempt to clean up the logs.
+    /// 5. Verify that the result is an error.
     #[test]
     fn test_cleanup_logs_with_invalid_path() {
         let invalid_path = format!("/tmp/nonexistent_{}/test.log", std::process::id());

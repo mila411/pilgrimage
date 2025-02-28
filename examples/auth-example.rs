@@ -9,11 +9,10 @@ fn main() {
 
     // Approval Setup
     let mut rbac = RoleBasedAccessControl::new();
-    rbac.add_role("admin", vec![
-        Permission::Read,
-        Permission::Write,
-        Permission::Admin,
-    ]);
+    rbac.add_role(
+        "admin",
+        vec![Permission::Read, Permission::Write, Permission::Admin],
+    );
     rbac.add_role("user", vec![Permission::Read]);
     rbac.assign_role("user1", "admin");
 

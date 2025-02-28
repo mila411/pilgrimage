@@ -1,8 +1,20 @@
+//! Module for the heartbeat mechanism of the broker leader.
+//!
+//! The `Heartbeat` struct manages the heartbeat mechanism for a broker.
+//! This struct provides methods to create a new heartbeat instance,
+//! start the heartbeat mechanism, send heartbeats to peers, and check for timeouts.
+//!
+//! The heartbeat is sent every 500 milliseconds and monitored every 100 milliseconds.
+
 use super::election::LeaderElection;
 use super::state::BrokerState;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+/// The `Heartbeat` struct manages the heartbeat mechanism for a broker.
+///
+/// This struct provides methods to create a new heartbeat instance,
+/// start the heartbeat mechanism, send heartbeats to peers, and check for timeouts.
 pub struct Heartbeat {
     pub last_beat: Arc<Mutex<Instant>>,
     pub timeout: Duration,
@@ -32,6 +44,12 @@ impl Heartbeat {
     }
 
     /// Starts the heartbeat mechanism.
+    ///
+    /// This method starts two threads:
+    /// 1. A thread to send heartbeats to peers.
+    /// 2. A thread to monitor the heartbeat and start an election if the heartbeat times out.
+    ///
+    /// The heartbeat is sent every 500 milliseconds and monitored every 100 milliseconds.
     ///
     /// # Arguments
     ///
@@ -80,6 +98,9 @@ impl Heartbeat {
 
     /// Sends a heartbeat to the peers.
     ///
+    /// This method sends a heartbeat to all the peers in the leader election.
+    /// **Unfortunately, the actual network communication is not implemented yet.**
+    ///
     /// # Arguments
     ///
     /// * `election` - The leader election instance.
@@ -103,6 +124,12 @@ impl Heartbeat {
         }
     }
 
+    /// Checks if the heartbeat has timed out.
+    ///
+    /// This method checks if the heartbeat has timed out based on the timeout duration.
+    ///
+    /// # Returns
+    /// * `bool` - Returns `true` if the heartbeat has timed out, otherwise `false`.
     fn check_timeout(&self) -> bool {
         let last = *self.last_beat.lock().unwrap();
         last.elapsed() > self.timeout
@@ -113,6 +140,16 @@ impl Heartbeat {
 mod tests {
     use super::*;
 
+    /// Tests the timeout of the heartbeat.
+    ///
+    /// # Purpose
+    /// The purpose of this test is to verify that the heartbeat times out
+    /// after the specified duration.
+    ///
+    /// # Steps
+    /// 1. Create a new heartbeat instance with a timeout of 100 milliseconds.
+    /// 2. Sleep for 150 milliseconds.
+    /// 3. Check if the heartbeat has timed out.
     #[test]
     fn test_heartbeat_timeout() {
         let heartbeat = Heartbeat::new(Duration::from_millis(100));
@@ -120,6 +157,15 @@ mod tests {
         assert!(heartbeat.check_timeout());
     }
 
+    /// Tests the heartbeat within the timeout.
+    ///
+    /// # Purpose
+    /// The purpose of this test is to verify that the heartbeat does not time out
+    /// within the specified duration.
+    ///
+    /// # Steps
+    /// 1. Create a new heartbeat instance with a timeout of 100 milliseconds.
+    /// 2. Check if the heartbeat has timed out.
     #[test]
     fn test_heartbeat_within_timeout() {
         let heartbeat = Heartbeat::new(Duration::from_millis(100));

@@ -10,6 +10,10 @@ test_*
 test_db_path
 processed_messages.json
 
+### RustRover ###
+# Generated automatically
+.idea
+
 # Created by https://www.toptal.com/developers/gitignore/api/macos,rust,rust-analyzer,visualstudiocode
 # Edit at https://www.toptal.com/developers/gitignore?templates=macos,rust,rust-analyzer,visualstudiocode
 
