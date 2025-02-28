@@ -63,7 +63,7 @@ To use Pilgrimage, add the following to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-pilgrimage = "0.12"
+pilgrimage = "0.13.3"
 ```
 
 --------------------
