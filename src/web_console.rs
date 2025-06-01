@@ -528,6 +528,10 @@ mod tests {
     /// 5. Assert that the response status is successful.
     #[actix_rt::test]
     async fn test_start_broker() {
+        // Use a unique temp directory for each test run to avoid conflicts
+        let test_id = uuid::Uuid::new_v4().to_string();
+        let storage_path = format!("./target/test_storage_{}", test_id);
+
         let state = AppState {
             brokers: Arc::new(Mutex::new(HashMap::new())),
         };
@@ -545,12 +549,15 @@ mod tests {
                 "id": "broker1",
                 "partitions": 3,
                 "replication": 2,
-                "storage": "/tmp/broker1"
+                "storage": storage_path
             }))
             .to_request();
 
         let resp = test::call_service(&mut app, req).await;
         assert!(resp.status().is_success());
+
+        // Clean up test resources
+        let _ = std::fs::remove_dir_all(storage_path);
     }
 
     /// Test for stopping a broker.
@@ -571,6 +578,10 @@ mod tests {
     ///    indicating that the broker has been stopped.
     #[actix_rt::test]
     async fn test_stop_broker() {
+        // Use a unique temp directory for each test run to avoid conflicts
+        let test_id = uuid::Uuid::new_v4().to_string();
+        let storage_path = format!("./target/test_storage_{}", test_id);
+
         let state = AppState {
             brokers: Arc::new(Mutex::new(HashMap::new())),
         };
@@ -590,11 +601,14 @@ mod tests {
                 "id": "broker1",
                 "partitions": 3,
                 "replication": 2,
-                "storage": "/tmp/broker1"
+                "storage": storage_path
             }))
             .to_request();
 
         let _ = test::call_service(&mut app, req).await;
+
+        // Give the broker time to initialize fully
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
         // Now stop the broker
         let req = test::TestRequest::post()
@@ -606,6 +620,9 @@ mod tests {
 
         let resp = test::call_service(&mut app, req).await;
         assert!(resp.status().is_success());
+
+        // Clean up test resources
+        let _ = std::fs::remove_dir_all(storage_path);
     }
 
     /// Test for sending a message to a broker.
@@ -625,6 +642,10 @@ mod tests {
     /// 7. Assert that the response status is successful, indicating that the message was sent.
     #[actix_rt::test]
     async fn test_send_message() {
+        // Use a unique temp directory for each test run to avoid conflicts
+        let test_id = uuid::Uuid::new_v4().to_string();
+        let storage_path = format!("./target/test_storage_{}", test_id);
+
         let state = AppState {
             brokers: Arc::new(Mutex::new(HashMap::new())),
         };
@@ -644,11 +665,15 @@ mod tests {
                 "id": "broker1",
                 "partitions": 3,
                 "replication": 2,
-                "storage": "/tmp/broker1"
+                "storage": storage_path
             }))
             .to_request();
 
-        let _ = test::call_service(&mut app, req).await;
+        let resp = test::call_service(&mut app, req).await;
+        assert!(resp.status().is_success());
+
+        // Give the broker time to initialize fully
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
         // Now send a message
         let req = test::TestRequest::post()
@@ -661,6 +686,9 @@ mod tests {
 
         let resp = test::call_service(&mut app, req).await;
         assert!(resp.status().is_success());
+
+        // Clean up test resources
+        let _ = std::fs::remove_dir_all(storage_path);
     }
 
     /// Test for consuming messages from a broker.
@@ -685,6 +713,10 @@ mod tests {
     ///    indicating that the message was consumed.
     #[actix_rt::test]
     async fn test_consume_messages() {
+        // Use a unique temp directory for each test run to avoid conflicts
+        let test_id = uuid::Uuid::new_v4().to_string();
+        let storage_path = format!("./target/test_storage_{}", test_id);
+
         let state = AppState {
             brokers: Arc::new(Mutex::new(HashMap::new())),
         };
@@ -705,11 +737,15 @@ mod tests {
                 "id": "broker1",
                 "partitions": 3,
                 "replication": 2,
-                "storage": "/tmp/broker1"
+                "storage": storage_path
             }))
             .to_request();
 
-        let _ = test::call_service(&mut app, req).await;
+        let resp = test::call_service(&mut app, req).await;
+        assert!(resp.status().is_success());
+
+        // Give the broker time to initialize fully
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
         // Send a message
         let req = test::TestRequest::post()
@@ -720,7 +756,11 @@ mod tests {
             }))
             .to_request();
 
-        let _ = test::call_service(&mut app, req).await;
+        let resp = test::call_service(&mut app, req).await;
+        assert!(resp.status().is_success());
+
+        // Give the system time to process the message
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
         // Now consume the message
         let req = test::TestRequest::post()
@@ -732,6 +772,9 @@ mod tests {
 
         let resp = test::call_service(&mut app, req).await;
         assert!(resp.status().is_success());
+
+        // Clean up test resources
+        let _ = std::fs::remove_dir_all(storage_path);
     }
 
     /// Test for checking the status of a broker.
@@ -751,6 +794,10 @@ mod tests {
     /// 7. Assert that the response status is successful, indicating that the broker is healthy.
     #[actix_rt::test]
     async fn test_broker_status() {
+        // Use a unique temp directory for each test run to avoid conflicts
+        let test_id = uuid::Uuid::new_v4().to_string();
+        let storage_path = format!("./target/test_storage_{}", test_id);
+
         let state = AppState {
             brokers: Arc::new(Mutex::new(HashMap::new())),
         };
@@ -770,11 +817,15 @@ mod tests {
                 "id": "broker1",
                 "partitions": 3,
                 "replication": 2,
-                "storage": "/tmp/broker1"
+                "storage": storage_path
             }))
             .to_request();
 
-        let _ = test::call_service(&mut app, req).await;
+        let resp = test::call_service(&mut app, req).await;
+        assert!(resp.status().is_success());
+
+        // Give the broker time to initialize fully
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
         // Now check the broker status
         let req = test::TestRequest::post()
@@ -786,6 +837,9 @@ mod tests {
 
         let resp = test::call_service(&mut app, req).await;
         assert!(resp.status().is_success());
+
+        // Clean up test resources
+        let _ = std::fs::remove_dir_all(storage_path);
     }
 
     /// Test for starting a broker that is already running.
@@ -805,6 +859,10 @@ mod tests {
     ///    indicating that the broker is already running.
     #[actix_rt::test]
     async fn test_start_broker_already_running() {
+        // Use a unique temp directory for each test run to avoid conflicts
+        let test_id = uuid::Uuid::new_v4().to_string();
+        let storage_path = format!("./target/test_storage_{}", test_id);
+
         let state = AppState {
             brokers: Arc::new(Mutex::new(HashMap::new())),
         };
@@ -823,11 +881,15 @@ mod tests {
                 "id": "broker1",
                 "partitions": 3,
                 "replication": 2,
-                "storage": "/tmp/broker1"
+                "storage": storage_path.clone()
             }))
             .to_request();
 
-        let _ = test::call_service(&mut app, req).await;
+        let resp = test::call_service(&mut app, req).await;
+        assert!(resp.status().is_success());
+
+        // Give the broker time to initialize fully
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
         // Try to start the same broker again
         let req = test::TestRequest::post()
@@ -836,7 +898,7 @@ mod tests {
                 "id": "broker1",
                 "partitions": 3,
                 "replication": 2,
-                "storage": "/tmp/broker1"
+                "storage": storage_path.clone()
             }))
             .to_request();
 
@@ -1013,6 +1075,10 @@ mod tests {
     ///    indicating that the broker has been started and the server is running.
     #[actix_rt::test]
     async fn test_run_server() {
+        // Use a unique temp directory for each test run to avoid conflicts
+        let test_id = uuid::Uuid::new_v4().to_string();
+        let storage_path = format!("./target/test_storage_{}", test_id);
+
         let srv = actix_test::start(|| {
             App::new()
                 .app_data(web::Data::new(AppState {
@@ -1031,11 +1097,14 @@ mod tests {
                 "id": "broker1",
                 "partitions": 3,
                 "replication": 2,
-                "storage": "/tmp/broker1"
+                "storage": storage_path
             }))
             .await
             .unwrap();
 
         assert!(req.status().is_success());
+
+        // Clean up test resources
+        let _ = std::fs::remove_dir_all(storage_path);
     }
 }
