@@ -35,13 +35,17 @@ Pilgrimage is a Rust implementation of a distributed messaging system inspired b
   - [Dependency](#dependency)
   - [Functionality Implemented](#functionality-implemented)
   - [Examples](#examples)
-  - [Bench](#bench)
+  - [Benchmarks](#benchmarks)
+    - [execution method](#execution-method)
+    - [Benchmark Category](#benchmark-category)
+    - [Checking Reports](#checking-reports)
 - [CLI Features](#cli-features)
   - [start](#start)
   - [stop](#stop)
   - [send](#send)
   - [consume](#consume)
   - [status](#status)
+  - [schema](#schema)
   - [Additional Information](#additional-information)
   - [Running the CLI](#running-the-cli)
 - [Web Console API](#web-console-api)
@@ -63,7 +67,7 @@ To use Pilgrimage, add the following to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-pilgrimage = "0.13.3"
+pilgrimage = "0.14.0"
 ```
 
 --------------------
@@ -100,56 +104,64 @@ When using Pilgramage as a Crate, client authentication is implemented, but at p
 ## Basic Usage
 
 ```rust
-use pilgrimage::broker::Broker;
-use pilgrimage::message::message::Message;
+use pilgrimage::broker::{Broker, MessageSchema, TopicConfig};
 use pilgrimage::schema::registry::SchemaRegistry;
+use chrono::Utc;
+use uuid::Uuid;
 use std::sync::{Arc, Mutex};
-use std::thread;
-use std::time::Duration;
+use tokio::time::{sleep, Duration};
 
-fn main() {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Creating a schema registry
     let schema_registry = SchemaRegistry::new();
     let schema_def = r#"{"type":"record","name":"test","fields":[{"name":"id","type":"string"}]}"#;
-    schema_registry
-        .register_schema("test_topic", schema_def)
-        .unwrap();
+    schema_registry.register_schema("test_topic", schema_def)?;
 
-    // Broker Creation
+    // Creating a Broker
     let broker = Arc::new(Mutex::new(Broker::new("broker1", 3, 2, "logs")));
 
-    // Creating a topic
+    // Creating topics (setting the number of partitions and replication factors)
     {
         let mut broker = broker.lock().unwrap();
-        broker.create_topic("test_topic", Some(1)).unwrap();
+        let config = TopicConfig {
+            num_partitions: 2,
+            replication_factor: 1,
+            ..Default::default()
+        };
+        broker.create_topic("test_topic", Some(config))?;
     }
 
-    // Receiving thread
+    // Message Receiving Thread
     let broker_clone = Arc::clone(&broker);
-    let receiver = thread::spawn(move || {
+    let receiver = tokio::spawn(async move {
         for _ in 0..5 {
-            let broker = broker_clone.lock().unwrap();
-            if let Some(message) = broker.receive_message() {
-                println!("Received: {}", message.content);
+            if let Ok(broker) = broker_clone.lock() {
+                if let Ok(Some(message)) = broker.receive_message("test_topic", 0) {
+                    println!("reception: {}", message.content);
+                }
             }
-            drop(broker);
-            thread::sleep(Duration::from_millis(100));
+            sleep(Duration::from_millis(100)).await;
         }
     });
 
-    // Sender processing
+    // Message Sending Process
     for i in 1..=5 {
-        let message = Message::new(format!("Message {}", i));
-        {
-            let broker = broker.lock().unwrap();
-            broker.send_message(message).unwrap();
-            println!("Sent message {}", i);
+        let message = MessageSchema::new()
+            .with_content(format!("Message {}", i))
+            .with_topic("test_topic".to_string())
+            .with_partition(0);
+
+        if let Ok(mut broker) = broker.lock() {
+            broker.send_message(message)?;
+            println!("Send: Message {}", i);
         }
-        thread::sleep(Duration::from_millis(100));
+        sleep(Duration::from_millis(100)).await;
     }
 
-    // Waiting for the end of the incoming thread
-    receiver.join().unwrap();
+    // Wait for receiving thread to terminate
+    receiver.await?;
+    Ok(())
 }
 ```
 
@@ -175,37 +187,136 @@ fn main() {
 To execute a basic example, use the following command:
 
 ```bash
-cargo run --example ack-mulch-transaction
-cargo run --example ack-send-recv
-cargo run --example auth-example
+cargo run --example ack-transaction
+cargo run --example amqp-send-recv
 cargo run --example auth-send-recv
-cargo run --example idempotency
-cargo run --example persistant-ack
-cargo run --example simple-send-recv
-cargo run --example thread-send-recv
-cargo run --example transaction-send-recv
+cargo run --example batch-transaction
+cargo run --example broker-integration-test
+cargo run --example idempotency-test
+cargo run --example improved-transaction
+cargo run --example persistent-ack
 ```
 
-### Bench
+### Benchmarks
+
+Pilgrimage includes a comprehensive suite of benchmarks to measure performance in a variety of scenarios.
+
+#### execution method
+
+```bash
+cargo bench
+```
+
+#### Benchmark Category
+
+1. **Message Sending** - Transmission performance with different message sizes
+   - Small messages (~12 bytes): ~6.0 µs
+   - Medium messages (1KB): ~16.2 µs
+   - Large messages (10KB): ~19.6 µs
+
+2. **Message Receiving** - Message reception performance
+   - Average receive time: ~82.7 µs
+
+3. **Topic Operations** - Topic Management Operations
+   - Topic creation: ~1.6 µs
+   - Topic listing: ~652 ms (warning: slow operation)
+
+4. **Partition Operations** - Transmission performance by partition
+   - 1 partition: ~7.2 µs
+   - 2 partitions: ~13.9 µs
+   - 4 partitions: ~28.5 µs
+   - 8 partitions: ~54.7 µs
+
+5. **Concurrent Operations** - Parallel transmission and reception performance
+   - Send + Receive: ~5.5 ms
+
+6. **Throughput Testing** - Batch Processing Performance
+   - 10 messages: ~69.0 µs
+   - 100 messages: ~693 µs
+   - 1000 messages: ~6.7 ms
+
+#### Checking Reports
+
+After the benchmark is run, a detailed HTML report is generated in `target/criterion/report/index.html`.
 
 If the allocated memory is small, it may fail.
 
 ```sh
 Gnuplot not found, using plotters backend
-send_message            time:   [849.75 ns 851.33 ns 853.18 ns]
-                        change: [-23.318% -20.131% -18.021%] (p = 0.00 < 0.05)
-                        Performance has improved.
+Benchmarking message_sending/send_message/small: Collecting 100 samples in estimated                                                                                    message_sending/send_message/small
+                        time:   [5.9308 µs 6.0175 µs 6.1085 µs]
+Found 7 outliers among 100 measurements (7.00%)
+  5 (5.00%) high mild
+  2 (2.00%) high severe
+Benchmarking message_sending/send_message/medium: Collecting 100 samples in estimate                                                                                    message_sending/send_message/medium
+                        time:   [15.097 µs 16.234 µs 17.513 µs]
+Found 2 outliers among 100 measurements (2.00%)
+  2 (2.00%) high mild
+Benchmarking message_sending/send_message/large: Collecting 100 samples in estimated                                                                                    message_sending/send_message/large
+                        time:   [19.128 µs 19.556 µs 20.154 µs]
+Found 13 outliers among 100 measurements (13.00%)
+  2 (2.00%) low mild
+  5 (5.00%) high mild
+  6 (6.00%) high severe
+
+Benchmarking message_receiving/receive_message: Collecting 100 samples in estimated                                                                                     message_receiving/receive_message
+                        time:   [82.541 µs 82.696 µs 82.857 µs]
+Found 11 outliers among 100 measurements (11.00%)
+  1 (1.00%) low severe
+  1 (1.00%) low mild
+  8 (8.00%) high mild
+  1 (1.00%) high severe
+
+Benchmarking topic_operations/create_topic: Collecting 100 samples in estimated 5.00                                                                                    topic_operations/create_topic
+                        time:   [1.4150 µs 1.5777 µs 1.9184 µs]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high severe
+Benchmarking topic_operations/list_topics: Warming up for 3.0000 s
+Warning: Unable to complete 100 samples in 5.0s. You may wish to increase target time to 65.9s, or reduce sample count to 10.
+Benchmarking topic_operations/list_topics: Collecting 100 samples in estimated 65.86                                                                                    topic_operations/list_topics
+                        time:   [648.33 ms 652.26 ms 656.59 ms]
+Found 13 outliers among 100 measurements (13.00%)
+  10 (10.00%) low mild
+  1 (1.00%) high mild
+  2 (2.00%) high severe
+
+Benchmarking partition_operations/send_to_partitions/1: Collecting 100 samples in es                                                                                    partition_operations/send_to_partitions/1
+                        time:   [6.8442 µs 7.1557 µs 7.5364 µs]
+Found 2 outliers among 100 measurements (2.00%)
+  2 (2.00%) high severe
+Benchmarking partition_operations/send_to_partitions/2: Collecting 100 samples in es                                                                                    partition_operations/send_to_partitions/2
+                        time:   [13.501 µs 13.921 µs 14.396 µs]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high severe
+Benchmarking partition_operations/send_to_partitions/4: Collecting 100 samples in es                                                                                    partition_operations/send_to_partitions/4
+                        time:   [27.957 µs 28.450 µs 28.927 µs]
+Found 4 outliers among 100 measurements (4.00%)
+  3 (3.00%) high mild
+  1 (1.00%) high severe
+Benchmarking partition_operations/send_to_partitions/8: Collecting 100 samples in es                                                                                    partition_operations/send_to_partitions/8
+                        time:   [53.335 µs 54.671 µs 55.994 µs]
+
+Benchmarking concurrent_operations/concurrent_send_receive: Warming up for 3.0000 s
+Warning: Unable to complete 100 samples in 5.0s. You may wish to increase target time to 8.0s, enable flat sampling, or reduce sample count to 50.
+Benchmarking concurrent_operations/concurrent_send_receive: Collecting 100 samples i                                                                                    concurrent_operations/concurrent_send_receive
+                        time:   [5.2259 ms 5.5166 ms 5.7806 ms]
 Found 1 outliers among 100 measurements (1.00%)
   1 (1.00%) high mild
 
-send_benchmark_message  time:   [850.69 ns 852.08 ns 853.67 ns]
-                        change: [-33.444% -26.669% -22.423%] (p = 0.00 < 0.05)
-                        Performance has improved.
-Found 2 outliers among 100 measurements (2.00%)
-  2 (2.00%) high mild
+Benchmarking throughput/batch_send/10: Collecting 10 samples in estimated 5.0011 s (                                                                                    throughput/batch_send/10
+                        time:   [67.767 µs 68.967 µs 70.823 µs]
+Found 1 outliers among 10 measurements (10.00%)
+  1 (10.00%) high mild
+Benchmarking throughput/batch_send/100: Collecting 10 samples in estimated 5.0197 s                                                                                     throughput/batch_send/100
+                        time:   [687.47 µs 693.34 µs 700.38 µs]
+Benchmarking throughput/batch_send/1000: Collecting 10 samples in estimated 5.0580 s                                                                                    throughput/batch_send/1000
+                        time:   [6.6636 ms 6.7133 ms 6.7860 ms]
+Found 1 outliers among 10 measurements (10.00%)
+  1 (10.00%) low severe
 ```
 
 To run the benchmark on your local machine, use the command:
+
 ```bash
 cargo bench
 ```
@@ -260,38 +371,43 @@ Stops the specified broker.
 
 **Description:**
 
-Sends a message to the specified broker.
+Sends a message to a topic.
 
 **Usage**
 
-`pilgrimage send <BROKER_ID> <MESSAGE>`
+`pilgrimage send --topic <TOPIC> --message <MESSAGE> [--schema <SCHEMA>] [--compatibility <COMPATIBILITY>]`
 
-**Arguments:**
+**Options:**
 
-- `<BROKER_ID>` (required): The ID of the broker to send the message to.
-- `<MESSAGE>` (required): The message content to send.
+- `--topic`, `-t` (required): Specifies the topic name.
+- `--message`, `-m` (required): Specifies the message to send.
+- `--schema`, `-s` (optional): Specifies the path to a schema file. If not specified, an existing schema will be used.
+- `--compatibility`, `-c` (optional): Specifies the schema compatibility level (BACKWARD, FORWARD, FULL, NONE).
 
 **Example**
 
-`pilgrimage send broker1 "Hello, World!"`
+`pilgrimage send --topic test_topic --message "Hello, World!"`
 
 ### consume
 
 **Description:**
 
-Consumes messages from the specified broker.
+Consumes messages from a broker.
 
 **Usage**
 
-`pilgrimage consume <BROKER_ID>`
+`pilgrimage consume --id <BROKER_ID> [--topic <TOPIC>] [--partition <PARTITION>] [--group <GROUP>]`
 
-**Arguments:**
+**Options:**
 
-- `<BROKER_ID>` (required): The ID of the broker to consume messages from.
+- `--id`, `-i` (required): Specifies the broker ID.
+- `--topic`, `-t` (optional): Specifies the topic name.
+- `--partition`, `-p` (optional): Specifies the partition number.
+- `--group`, `-g` (optional): Specifies the consumer group ID.
 
 **Example:**
 
-`pilgrimage consume broker1`
+`pilgrimage consume --id broker1 --topic test_topic --partition 0`
 
 ### status
 
@@ -310,6 +426,44 @@ Checks the status of the specified broker.
 
 `pilgrimage status --id broker1`
 
+### schema
+
+**Description:**
+
+Manages message schemas for topics.
+
+**Subcommands:**
+
+1. **register** - Register a new schema for a topic
+
+   **Usage:**
+
+   `pilgrimage schema register --topic <TOPIC> --schema <SCHEMA_FILE> [--compatibility <COMPATIBILITY>]`
+
+   **Options:**
+
+   - `--topic`, `-t` (required): Specifies the topic name to register the schema for.
+   - `--schema`, `-s` (required): Specifies the path to the schema file.
+   - `--compatibility`, `-c` (optional): Specifies the schema compatibility level (BACKWARD, FORWARD, FULL, NONE).
+
+   **Example:**
+
+   `pilgrimage schema register --topic test_topic --schema ./schemas/test_schema.json --compatibility BACKWARD`
+
+2. **list** - List all schemas for a topic
+
+   **Usage:**
+
+   `pilgrimage schema list --topic <TOPIC>`
+
+   **Options:**
+
+   - `--topic`, `-t` (required): Specifies the topic name.
+
+   **Example:**
+
+   `pilgrimage schema list --topic test_topic`
+
 ### Additional Information
 
 - **Help Command:**
@@ -324,10 +478,23 @@ Checks the status of the specified broker.
 
 ### Running the CLI
 
-To start the web server:
+To run the CLI application:
 
 ```sh
-cargo run --bin pilgrimage
+cargo run --bin pilgrimage -- [COMMAND] [OPTIONS]
+```
+
+Examples:
+
+```sh
+# Start a broker
+cargo run --bin pilgrimage -- start --id broker1 --partitions 3 --replication 2 --storage ./storage/broker1
+
+# Send a message to a topic
+cargo run --bin pilgrimage -- send --topic test_topic --message "Hello, World!"
+
+# Consume messages from a broker
+cargo run --bin pilgrimage -- consume --id broker1 --topic test_topic
 ```
 
 --------------------
@@ -392,7 +559,7 @@ curl -X POST http://localhost:8080/stop \
 
 #### Send Message
 
-Sends a message to the broker.
+Sends a message to the broker. If the specified topic does not exist, it will be created automatically.
 
 **Endpoint**: `POST /send`
 **Request:**
@@ -400,6 +567,7 @@ Sends a message to the broker.
 ```json
 {
     "id": "broker1",
+    "topic": "custom-topic",
     "message": "Hello, World!"
 }
 ```
@@ -411,31 +579,43 @@ curl -X POST http://localhost:8080/send \
   -H "Content-Type: application/json" \
   -d '{
     "id": "broker1",
+    "topic": "custom-topic",
     "message": "Hello, World!"
   }'
 ```
 
 #### Consume Messages
 
-Consumes messages from the broker.
+Consumes messages from the broker. If the specified topic does not exist, it will be created automatically.
 
 **Endpoint**: `POST /consume`
 
 **Request:**
 
-```sh
+```json
 {
-    "id": "broker1"
+    "id": "broker1",
+    "topic": "custom-topic",
+    "partition": 0
 }
 ```
 
 **Example:**
 
 ```sh
+# Default topic (default_topic)
 curl -X POST http://localhost:8080/consume \
   -H "Content-Type: application/json" \
   -d '{
     "id": "broker1"
+  }'
+
+# Custom topic
+curl -X POST http://localhost:8080/consume \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": "broker1",
+    "topic": "custom-topic"
   }'
 ```
 

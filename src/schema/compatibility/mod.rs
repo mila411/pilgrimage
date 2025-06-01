@@ -29,6 +29,7 @@
 //! ```
 
 use crate::schema::registry::Schema;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 /// Enum representing the compatibility modes for schema evolution.
@@ -39,19 +40,25 @@ use serde_json::Value;
 /// * `FORWARD` - Ensures that old schemas can read data written by new schemas.
 /// * `FULL` - Ensures both backward and forward compatibility.
 /// * `NONE` - No compatibility checks.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "UPPERCASE")]
 pub enum Compatibility {
-    /// Ensures that new schemas can read data written by old schemas.
-    BACKWARD,
-    /// Ensures that old schemas can read data written by new schemas.
-    FORWARD,
-    /// Ensures both backward and forward compatibility.
-    FULL,
-    /// No compatibility checks.
-    NONE,
+    Backward,
+    Forward,
+    Full,
+    None,
 }
 
 impl Compatibility {
+    /// Backward compatibility mode (new schema can read old data)
+    pub const BACKWARD: Self = Self::Backward;
+    /// Forward compatibility mode (old schema can read new data)
+    pub const FORWARD: Self = Self::Forward;
+    /// Full compatibility mode (guaranteed bi-directional compatibility)
+    pub const FULL: Self = Self::Full;
+    /// No compatibility check
+    pub const NONE: Self = Self::None;
+
     /// Checks the compatibility between a new schema and an old schema.
     ///
     /// # Arguments
@@ -65,13 +72,13 @@ impl Compatibility {
     /// * `false` otherwise.
     pub fn check(&self, new_schema: &Schema, old_schema: &Schema) -> bool {
         match self {
-            Compatibility::BACKWARD => Self::check_backward(new_schema, old_schema),
-            Compatibility::FORWARD => Self::check_forward(new_schema, old_schema),
-            Compatibility::FULL => {
+            Compatibility::Backward => Self::check_backward(new_schema, old_schema),
+            Compatibility::Forward => Self::check_forward(new_schema, old_schema),
+            Compatibility::Full => {
                 Self::check_backward(new_schema, old_schema)
                     && Self::check_forward(new_schema, old_schema)
             }
-            Compatibility::NONE => true,
+            Compatibility::None => true,
         }
     }
 

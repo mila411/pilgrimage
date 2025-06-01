@@ -13,40 +13,32 @@
 //! use std::collections::HashMap;
 //!
 //! let peers = HashMap::new();
-//! let election = LeaderElection::new("broker1", peers);
+//! let mut election = LeaderElection::new("broker1", peers);
 //! let elected = election.start_election();
 //!
 //! // Check if the broker was elected as leader
+//! // Note: In a single-node setup without peers, the election will succeed
 //! assert!(elected);
 //! assert_eq!(*election.state.lock().unwrap(), BrokerState::Leader);
 //! ```
 
-use super::heartbeat::Heartbeat;
-use super::state::{BrokerState, Term};
+use crate::broker::leader::state::BrokerState;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
 
+#[derive(Clone)]
 /// The `LeaderElection` struct manages the leader election process for a broker.
 ///
 /// This struct provides methods to create a new leader election instance,
 /// start the election process, and request votes from peers.
-#[derive(Clone)]
 pub struct LeaderElection {
     /// The ID of the broker.
-    pub broker_id: String,
+    pub node_id: String,
     /// The current state of the broker.
     /// This is shared between the leader election and heartbeat threads.
     pub state: Arc<Mutex<BrokerState>>,
-    /// The current term of the broker.
-    pub term: Arc<Mutex<Term>>,
     /// A hashmap of peer broker IDs and their addresses.
-    pub peers: Arc<Mutex<HashMap<String, String>>>,
-    /// The last time a heartbeat was sent.
-    pub last_heartbeat: Arc<Mutex<Instant>>,
-    /// The duration of the election timeout.
-    pub election_timeout: Duration,
+    pub votes: Arc<Mutex<HashMap<String, String>>>,
 }
 
 impl LeaderElection {
@@ -65,19 +57,13 @@ impl LeaderElection {
     ///
     /// let peers = HashMap::new();
     /// let election = LeaderElection::new("broker1", peers);
-    /// assert_eq!(election.broker_id, "broker1");
+    /// assert_eq!(election.node_id, "broker1");
     /// ```
-    pub fn new(broker_id: &str, peers: HashMap<String, String>) -> Self {
-        LeaderElection {
-            broker_id: broker_id.to_string(),
+    pub fn new(node_id: &str, votes: HashMap<String, String>) -> Self {
+        Self {
+            node_id: node_id.to_string(),
             state: Arc::new(Mutex::new(BrokerState::Follower)),
-            term: Arc::new(Mutex::new(Term {
-                current: AtomicU64::new(0),
-                voted_for: None,
-            })),
-            peers: Arc::new(Mutex::new(peers)),
-            last_heartbeat: Arc::new(Mutex::new(Instant::now())),
-            election_timeout: Duration::from_secs(5),
+            votes: Arc::new(Mutex::new(votes)),
         }
     }
 
@@ -102,41 +88,101 @@ impl LeaderElection {
     /// let elected = election.start_election();
     /// assert!(elected);
     /// ```
-    pub fn start_election(&self) -> bool {
-        let mut state = self.state.lock().unwrap();
-        if *state != BrokerState::Follower {
-            return false;
-        }
+    pub fn start_election(&mut self) -> bool {
+        *self.state.lock().unwrap() = BrokerState::Candidate;
 
-        *state = BrokerState::Candidate;
-        let mut term = self.term.lock().unwrap();
-        term.current.fetch_add(1, Ordering::SeqCst);
-        term.voted_for = Some(self.broker_id.clone());
+        // Add your own vote
+        self.receive_vote(self.node_id.clone(), self.node_id.clone());
 
-        let votes = self.request_votes();
-        let peers = self.peers.lock().unwrap();
-        let majority = (peers.len() + 1) / 2 + 1;
+        let votes = self.get_vote_count();
+        let total_nodes = {
+            if let Ok(votes_map) = self.votes.lock() {
+                std::cmp::max(1, votes_map.len()) // At a minimum, include yourself.
+            } else {
+                1
+            }
+        };
+        let votes_needed = (total_nodes + 1) / 2;
 
-        if votes >= majority {
-            *state = BrokerState::Leader;
-            Heartbeat::start(self.clone());
+        if votes >= votes_needed {
+            self.become_leader();
             true
         } else {
-            *state = BrokerState::Follower;
             false
         }
     }
 
-    /// Requests votes from peers.
-    ///
-    /// This method sends a vote request to each peer and waits for a response.
+    /// Transitions the broker to a leader state.
+    pub fn become_leader(&mut self) {
+        *self.state.lock().unwrap() = BrokerState::Leader;
+    }
+
+    /// Transitions the broker to a follower state.
+    pub fn step_down(&mut self) {
+        *self.state.lock().unwrap() = BrokerState::Follower;
+    }
+
+    /// Checks if the broker is the leader.
     ///
     /// # Returns
-    /// The number of votes received.
-    fn request_votes(&self) -> usize {
-        let votes = 1;
-        let peers = self.peers.lock().unwrap();
-        votes + peers.len()
+    /// `true` if the broker is the leader, `false` otherwise.
+    pub fn is_leader(&self) -> bool {
+        *self.state.lock().unwrap() == BrokerState::Leader
+    }
+
+    /// Receives a vote from a peer.
+    ///
+    /// # Arguments
+    ///
+    /// * `voter_id` - The ID of the voter broker.
+    /// * `vote` - The vote (usually the ID of the broker being voted for).
+    pub fn receive_vote(&mut self, voter_id: String, vote: String) {
+        if let Ok(mut votes) = self.votes.lock() {
+            votes.insert(voter_id, vote);
+        }
+    }
+
+    /// Gets the number of votes received.
+    ///
+    /// # Returns
+    /// The number of votes.
+    pub fn get_vote_count(&self) -> usize {
+        if let Ok(votes) = self.votes.lock() {
+            votes.len()
+        } else {
+            0
+        }
+    }
+
+    /// Gets the current state of the broker.
+    ///
+    /// # Returns
+    /// The current state of the broker.
+    pub fn get_state(&self) -> BrokerState {
+        self.state.lock().unwrap().clone()
+    }
+
+    /// Sets the state of the broker.
+    ///
+    /// # Arguments
+    ///
+    /// * `state` - The new state of the broker.
+    pub fn set_state(&self, state: BrokerState) {
+        if let Ok(mut current_state) = self.state.lock() {
+            *current_state = state;
+        }
+    }
+
+    /// Gets the votes received from peers.
+    ///
+    /// # Returns
+    /// A vector of votes.
+    pub fn get_votes(&self) -> Vec<String> {
+        if let Ok(votes) = self.votes.lock() {
+            votes.values().cloned().collect()
+        } else {
+            Vec::new()
+        }
     }
 }
 
@@ -159,7 +205,7 @@ mod tests {
         peers.insert("peer1".to_string(), "localhost:8081".to_string());
         peers.insert("peer2".to_string(), "localhost:8082".to_string());
 
-        let election = LeaderElection::new("broker1", peers);
+        let mut election = LeaderElection::new("broker1", peers);
         assert_eq!(*election.state.lock().unwrap(), BrokerState::Follower);
 
         let elected = election.start_election();

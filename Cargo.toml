@@ -1,6 +1,6 @@
 [package]
 name = "pilgrimage"
-version = "0.13.3"
+version = "0.13.8"
 edition = "2024"
 authors = ["Kenny Miller Song"]
 description = "A Kafka-like message broker in Rust"
@@ -43,6 +43,10 @@ chrono = { version = "0.4", features = ["serde"] }
 tokio-amqp = "2.0.0"
 futures-util = "0.3"
 lapin = "2.5.0"
+parking_lot = "0.12.4"
+glob = "0.3.2"
+tracing = "0.1.41"
+thiserror = "2.0.12"
 
 [dev-dependencies]
 env_logger = "0.10"

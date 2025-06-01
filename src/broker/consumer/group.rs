@@ -67,6 +67,10 @@ pub struct ConsumerGroup {
     /// The partition assignments for the members.
     /// It maps each member to the list of partitions assigned to it.
     pub assignments: Arc<Mutex<HashMap<String, Vec<usize>>>>,
+    /// The number of partitions for the consumer group.
+    /// It can be changed dynamically, and the partitions will be rebalanced
+    /// among the members when it is changed.
+    pub num_partitions: usize,
 }
 
 /// Represents a member of a consumer group.
@@ -98,6 +102,7 @@ impl ConsumerGroup {
             group_id: group_id.to_string(),
             members: Arc::new(Mutex::new(HashMap::new())),
             assignments: Arc::new(Mutex::new(HashMap::new())),
+            num_partitions: 10, // default value
         }
     }
 
@@ -140,6 +145,41 @@ impl ConsumerGroup {
         self.rebalance_partitions();
     }
 
+    /// Sets the number of partitions for the consumer group.
+    ///
+    /// The partitions will be rebalanced among the members
+    /// when the number of partitions is changed.
+    ///
+    /// # Arguments
+    ///
+    /// * `num_partitions` - The new number of partitions.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use pilgrimage::broker::consumer::group::ConsumerGroup;
+    ///
+    /// let mut group = ConsumerGroup::new("group1");
+    /// group.set_num_partitions(5);
+    ///
+    /// // Check if the number of partitions is set correctly
+    /// assert_eq!(group.num_partitions, 5);
+    /// ```
+    pub fn set_num_partitions(&mut self, num_partitions: usize) {
+        self.num_partitions = num_partitions;
+        self.rebalance_partitions();
+    }
+
+    /// Resets the partition assignments for all members in the group.
+    ///
+    /// This method clears all existing partition assignments,
+    /// preparing the group for a new assignment process.
+    pub fn reset_assignments(&mut self) {
+        if let Ok(mut assignments) = self.assignments.lock() {
+            assignments.clear();
+        }
+    }
+
     /// Rebalances the partitions among the members of the consumer group.
     ///
     /// Assigns partitions to the members in a round-robin fashion.
@@ -169,10 +209,8 @@ impl ConsumerGroup {
             return;
         }
 
-        let total_partitions = 10;
         let num_members = member_ids.len();
-
-        for partition_id in 0..total_partitions {
+        for partition_id in 0..self.num_partitions {
             let idx = partition_id % num_members;
             let member_id = &member_ids[idx];
             assignments
@@ -213,14 +251,20 @@ impl ConsumerGroup {
     ///     let result = group.deliver_message("A beautiful message").await;
     ///     assert_eq!(result, Ok(()));
     /// });
-    pub async fn deliver_message(&mut self, message: &str) -> Result<(), String> {
-        if let Ok(members) = self.members.lock() {
-            for member in members.values() {
-                (member.subscriber.callback)(message.to_string());
-            }
-            Ok(())
-        } else {
-            Err("Failed to acquire lock on members".to_string())
+    pub async fn deliver_message(&self, message: &str) -> Result<(), String> {
+        // Copy the member list and release the locks early
+        let members = {
+            let members_guard = self.members.lock().map_err(|e| e.to_string())?;
+            members_guard
+                .values()
+                .map(|m| m.subscriber.clone())
+                .collect::<Vec<_>>()
+        };
+
+        // Message delivered with locks released
+        for subscriber in members {
+            (subscriber.callback)(message.to_string());
         }
+        Ok(())
     }
 }

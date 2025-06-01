@@ -1,9 +1,8 @@
 use pilgrimage::auth::authentication::{Authenticator, BasicAuthenticator};
 use pilgrimage::auth::authorization::{Permission, RoleBasedAccessControl};
 use pilgrimage::auth::token::TokenManager;
-use pilgrimage::broker::Broker;
+use pilgrimage::broker::{Broker, MessageSchema};
 use pilgrimage::crypto::Encryptor;
-use pilgrimage::message::message::Message;
 use std::error::Error;
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -32,12 +31,18 @@ fn main() -> Result<(), Box<dyn Error>> {
         let roles = vec!["admin".to_string()];
         let _token = token_manager.generate_token(username, roles)?;
 
-        let broker = Broker::new("broker1", 1, 5, "storage");
+        let mut broker = Broker::new("broker1", 1, 5, "storage/secure_broker.log");
+        broker.create_topic("secure_messages", None)?;
         let message = "Secret Message";
 
         // Encrypting and sending messages
         let encrypted_data = encryptor.encrypt(message.as_bytes())?;
-        let message = Message::new(String::from_utf8_lossy(&encrypted_data).to_string());
+        let encrypted_content = String::from_utf8_lossy(&encrypted_data).to_string();
+
+        let message = MessageSchema::new()
+            .with_content(encrypted_content)
+            .with_topic("secure_messages".to_string())
+            .with_partition(0);
 
         broker.send_message(message)?;
         println!("Encrypted message sent.");

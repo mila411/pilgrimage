@@ -1,166 +1,20 @@
-//! The `web_console` module provides functionality for managing brokers
-//! via HTTP endpoints.
-//!
-//! The module exposes a method to start a new HTTP server that listens on
-//! `localhost:8080` and provides the REST API available on the section
-//! [Available Endpoints](#available-endpoints).
-//!
-//! ## Available Endpoints
-//!
-//! ### Start Broker
-//!
-//! Starts a new broker instance.
-//!
-//! **Endpoint:** `POST /start`
-//! **Request:**
-//!
-//! ```json
-//! {
-//!     "id": "broker1",
-//!     "partitions": 3,
-//!     "replication": 2,
-//!     "storage": "/tmp/broker1"
-//! }
-//! ```
-//!
-//! **Example:**
-//!
-//! ```sh
-//! curl -X POST http://localhost:8080/start \
-//!   -H "Content-Type: application/json" \
-//!   -d '{
-//!     "id": "broker1",
-//!     "partitions": 3,
-//!     "replication": 2,
-//!     "storage": "/tmp/broker1"
-//!   }'
-//! ```
-//!
-//! ### Stop Broker
-//!
-//! Stops a running broker instance.
-//!
-//! **Endpoint**: `POST /stop`
-//! **Request:**
-//!
-//! ```json
-//! {
-//!     "id": "broker1"
-//! }
-//! ```
-//!
-//! **Example:**
-//!
-//! ```sh
-//! curl -X POST http://localhost:8080/stop \
-//!   -H "Content-Type: application/json" \
-//!   -d '{
-//!     "id": "broker1"
-//!   }'
-//! ```
-//!
-//! ### Send Message
-//!
-//! Sends a message to the broker.
-//!
-//! **Endpoint**: `POST /send`
-//! **Request:**
-//!
-//! ```json
-//! {
-//!     "id": "broker1",
-//!     "message": "Hello, World!"
-//! }
-//! ```
-//!
-//! **Example:**
-//!
-//! ```sh
-//! curl -X POST http://localhost:8080/send \
-//!   -H "Content-Type: application/json" \
-//!   -d '{
-//!     "id": "broker1",
-//!     "message": "Hello, World!"
-//!   }'
-//! ```
-//!
-//! ### Consume Messages
-//!
-//! Consumes messages from the broker.
-//!
-//! **Endpoint**: `POST /consume`
-//!
-//! **Request:**
-//!
-//! ```sh
-//! {
-//!     "id": "broker1"
-//! }
-//! ```
-//!
-//! **Example:**
-//!
-//! ```sh
-//! curl -X POST http://localhost:8080/consume \
-//!   -H "Content-Type: application/json" \
-//!   -d '{
-//!     "id": "broker1"
-//!   }'
-//! ```
-//!
-//! ### Check Status
-//!
-//! Checks the status of the broker.
-//!
-//! **Endpoint**: `POST /status`
-//!
-//! `Request:`
-//!
-//! ```sh
-//! {
-//!     "id": "broker1"
-//! }
-//! ```
-//!
-//! **Example:**
-//!
-//! ```sh
-//! curl -X POST http://localhost:8080/status \
-//!   -H "Content-Type: application/json" \
-//!   -d '{
-//!     "id": "broker1"
-//!   }'
-//! ```
-//!
-//! ## Running the Web Server
-//!
-//! To start the web server:
-//!
-//! ```sh
-//! cargo run --bin web
-//! ```
-//!
-//! The server will be available at [http://localhost:8080](http://localhost:8080).
-//!
-//! ## Internal Implementation
-//!
-//! Internally, the module uses the [`actix_web`](https://actix.rs/) crate to create an HTTP server
-//! that listens on the `localhost:8080` address and provides REST API endpoints to manage brokers.
-//!
-//! The module also uses the [`prometheus`](https://crates.io/crates/prometheus) crate to expose
-//! metrics for the application.
-//!
-//! Finally, the module uses the [`tokio`](https://tokio.rs/) crate to provide asynchronous support
-//! for the application.
-
 use actix_web::{App, HttpResponse, HttpServer, Responder, web};
 use log::debug;
-use pilgrimage::message::message::Message;
-use pilgrimage::{Broker, broker::Node};
 use prometheus::{Counter, Encoder, Histogram, TextEncoder, register_counter, register_histogram};
 use serde::Deserialize;
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
+
+use chrono::Utc;
+use pilgrimage::{
+    broker::{Broker, node::Node},
+    message::metadata::MessageMetadata,
+    schema::{MessageSchema, registry::SchemaRegistry},
+    subscriber::types::Subscriber,
+};
+use uuid::Uuid;
 
 lazy_static::lazy_static! {
     /// Prometheus [`Counter`] for the total number of brokers started.
@@ -221,66 +75,38 @@ impl BrokerWrapper {
         }
     }
 
-    /// Sends a message to the broker.
-    ///
-    /// It converts the given string message into a [`Message`] object,
-    /// logs the message details (debug level),
-    /// and increments prometheus counters based on the result:
-    /// * [`MESSAGE_COUNTER`]
-    /// * [`DUPLICATE_MESSAGE_COUNTER`]
-    ///
-    /// # Arguments
-    /// * `message` - A [`String`] representing the message to be sent.
-    ///
-    /// # Returns
-    /// `Result<(), String>`: Returns `Ok(())` if the message was sent successfully,
-    /// or an error message if:
-    ///   1. the broker lock fails;
-    ///   2. if sending the message fails.
-    fn send_message(&self, message: String) -> Result<(), String> {
-        if let Ok(broker) = self.inner.lock() {
-            let message: Message = message.into();
-            debug!(
-                "Send a message: ID={}, Content={}",
-                message.id, message.content
-            );
-            let result = broker.send_message(message);
-            if result.is_ok() {
-                MESSAGE_COUNTER.inc();
-            } else {
-                DUPLICATE_MESSAGE_COUNTER.inc();
-            }
-            result
-        } else {
-            Err("Broker lock failed.".to_string())
-        }
-    }
-
-    /// Receives a message from the broker.
-    ///
-    /// If a message is received, it converts the [`Message`] object
-    /// to a [`String`] and logs the message details (debug level).
-    ///
-    /// # Returns
-    /// `Option<String>`: Returns the received message as a [`String`] if successful,
-    /// or [`None`] if the broker lock fails or no message is available.
-    fn receive_message(&self) -> Option<String> {
-        if let Ok(broker) = self.inner.lock() {
-            broker.receive_message().map(|msg| {
-                debug!("Message received: ID={}, content={}", msg.id, msg.content);
-                String::from(msg)
-            })
-        } else {
-            None
-        }
-    }
-
     /// Checks if the broker is healthy by attempting to lock the broker.
     ///
     /// # Returns
     /// `bool`: Returns `true` if the broker is healthy, otherwise `false`.
     fn is_healthy(&self) -> bool {
         self.inner.lock().is_ok()
+    }
+
+    /// Sends a message to the broker.
+    ///
+    /// # Arguments
+    /// * `message` - A [`MessageMetadata`] instance containing the message details.
+    ///
+    /// # Returns
+    /// `Result<(), String>` indicating the success or failure of the operation.
+    /// * `Ok(())` if the message was sent successfully.
+    /// * `Err(String)` containing the error message if the operation failed.
+    fn send_message(&self, message: MessageMetadata) -> Result<(), String> {
+        let schema = message
+            .schema
+            .clone()
+            .unwrap_or_else(|| MessageSchema::new());
+        let mut schema =
+            schema.with_topic(message.topic_id.unwrap_or_else(|| "default".to_string()));
+        schema.definition = message.content;
+
+        if let Some(partition_id) = message.partition_id {
+            schema = schema.with_partition(partition_id);
+        }
+
+        let mut broker = self.inner.lock().map_err(|_| "Failed to lock broker")?;
+        broker.send_message(schema)
     }
 }
 
@@ -342,6 +168,22 @@ struct SendRequest {
     id: String,
     /// Message to be sent to the broker.
     message: String,
+    /// Optional topic to send the message to.
+    #[serde(default = "default_topic")]
+    topic: String,
+    /// Optional number of partitions for the topic.
+    #[serde(default)]
+    partitions: Option<usize>,
+    /// Optional replication factor for the topic.
+    #[serde(default)]
+    replication_factor: Option<usize>,
+    /// Optional schema definition for message validation.
+    #[serde(default)]
+    schema: Option<String>,
+}
+
+fn default_topic() -> String {
+    "default_topic".to_string()
 }
 
 /// Deserializable structure for consuming messages from a broker.
@@ -349,6 +191,13 @@ struct SendRequest {
 struct ConsumeRequest {
     /// Unique identifier for the broker.
     id: String,
+    /// Optional topic to consume messages from.
+    #[serde(default = "default_topic")]
+    topic: String,
+    /// Optional consumer group ID.
+    group_id: Option<String>,
+    /// Optional partition ID to consume from.
+    partition: Option<usize>,
 }
 
 /// Deserializable structure for checking the status of a broker.
@@ -376,15 +225,17 @@ async fn start_broker(info: web::Json<StartRequest>, data: web::Data<AppState>) 
         return HttpResponse::BadRequest().json("Broker is already running");
     }
 
-    let broker = Broker::new(&info.id, info.partitions, info.replication, &info.storage);
+    let mut broker = Broker::new(&info.id, info.partitions, info.replication, &info.storage);
 
-    let node = Node {
-        id: "node1".to_string(),
-        address: "127.0.0.1:8080".to_string(),
-        is_active: true,
-        data: Arc::new(Mutex::new(Vec::new())),
-    };
+    // Add node and create initial topic
+    let node = Node::new("node1", "127.0.0.1:8080", true);
     broker.add_node("node1".to_string(), node);
+
+    // Create default topic
+    if let Err(e) = broker.create_topic("default_topic", None) {
+        return HttpResponse::InternalServerError()
+            .json(format!("Failed to create default topic: {}", e));
+    }
 
     let wrapper = BrokerWrapper::new(broker);
     brokers_lock.insert(info.id.clone(), wrapper);
@@ -432,13 +283,61 @@ async fn send_message(info: web::Json<SendRequest>, data: web::Data<AppState>) -
     let timer = REQUEST_HISTOGRAM.start_timer();
     let brokers_lock = data.brokers.lock().unwrap();
 
-    if let Some(broker) = brokers_lock.get(&info.id) {
-        let _ = broker.send_message(info.message.clone());
-        timer.observe_duration();
-        HttpResponse::Ok().json("Message sent")
+    if let Some(broker_wrapper) = brokers_lock.get(&info.id) {
+        {
+            let mut broker = broker_wrapper.inner.lock().unwrap();
+            let topics = broker.topics.lock().unwrap();
+
+            if !topics.contains_key(&info.topic) {
+                drop(topics);
+
+                if let Err(e) = broker.create_topic(&info.topic, None) {
+                    if !e.to_string().contains("already exists") {
+                        timer.observe_duration();
+                        return HttpResponse::InternalServerError()
+                            .json(format!("Failed to create topic: {}", e));
+                    }
+                }
+            }
+        }
+
+        let registry = SchemaRegistry::new();
+        if let Some(schema_def) = &info.schema {
+            if let Err(e) = registry.register_schema(&info.topic, schema_def) {
+                timer.observe_duration();
+                return HttpResponse::BadRequest()
+                    .json(format!("Schema registration failed.: {}", e));
+            }
+        }
+
+        let metadata = MessageMetadata {
+            id: Uuid::new_v4().to_string(),
+            content: info.message.clone(),
+            timestamp: Utc::now().to_rfc3339(),
+            topic_id: Some(info.topic.clone()),
+            partition_id: Some(0),
+            schema: info.schema.clone().map(|s| {
+                let mut schema = MessageSchema::new();
+                schema.definition = s;
+                schema
+            }),
+        };
+
+        match broker_wrapper.send_message(metadata) {
+            Ok(_) => {
+                MESSAGE_COUNTER.inc();
+                timer.observe_duration();
+                HttpResponse::Ok().json("Message sent.")
+            }
+            Err(e) => {
+                DUPLICATE_MESSAGE_COUNTER.inc();
+                timer.observe_duration();
+                HttpResponse::InternalServerError().json(format!("Failed to send message: {}", e))
+            }
+        }
     } else {
         timer.observe_duration();
-        HttpResponse::BadRequest().json("No broker is running with the given ID")
+        HttpResponse::BadRequest().json("The specified broker cannot be found.")
     }
 }
 
@@ -460,12 +359,58 @@ async fn consume_messages(
     let brokers_lock = data.brokers.lock().unwrap();
 
     if let Some(broker) = brokers_lock.get(&info.id) {
-        if let Some(message) = broker.receive_message() {
-            timer.observe_duration();
-            HttpResponse::Ok().json(message)
-        } else {
-            timer.observe_duration();
-            HttpResponse::Ok().json("No messages available")
+        {
+            let mut broker = broker.inner.lock().unwrap();
+            let topics = broker.topics.lock().unwrap();
+            if !topics.contains_key(&info.topic) {
+                drop(topics);
+
+                if let Err(e) = broker.create_topic(&info.topic, None) {
+                    if !e.to_string().contains("already exists") {
+                        timer.observe_duration();
+                        return HttpResponse::InternalServerError()
+                            .json(format!("Failed to create topic: {}", e));
+                    }
+                }
+            }
+        }
+
+        let subscriber = Subscriber::new(
+            format!("subscriber_{}", Uuid::new_v4()),
+            Box::new(|msg: String| {
+                debug!("Message received: {}", msg);
+            }),
+        );
+        {
+            let mut broker = broker.inner.lock().unwrap();
+            if let Err(e) = broker.subscribe(&info.topic, subscriber) {
+                timer.observe_duration();
+                return HttpResponse::InternalServerError()
+                    .json(format!("Failed to subscribe: {}", e));
+            }
+        }
+
+        {
+            let broker = broker.inner.lock().unwrap();
+            match broker.receive_message(&info.topic, info.partition.unwrap_or(0)) {
+                Ok(Some(message)) => {
+                    debug!(
+                        "Message received: Topic={}, Content={}",
+                        info.topic, message.content
+                    );
+                    timer.observe_duration();
+                    HttpResponse::Ok().json(message.content)
+                }
+                Ok(None) => {
+                    timer.observe_duration();
+                    HttpResponse::NotFound().json("No messages available")
+                }
+                Err(e) => {
+                    timer.observe_duration();
+                    HttpResponse::InternalServerError()
+                        .json(format!("Failed to receive message: {}", e))
+                }
+            }
         }
     } else {
         timer.observe_duration();
@@ -619,7 +564,7 @@ mod tests {
     /// 2. Initialize the Actix web application with the [`start_broker`]
     ///    and [`stop_broker`] routes.
     /// 3. Create a test request with valid broker start information.
-    /// 4. Call the service with the start request.
+    /// 4. Call the service with the test request.
     /// 5. Create a test request to stop the previously started broker.
     /// 6. Call the service with the stop request.
     /// 7. Assert that the response status is successful,

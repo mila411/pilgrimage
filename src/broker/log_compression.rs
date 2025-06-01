@@ -32,7 +32,10 @@ impl LogCompressor {
     /// # Errors
     /// If the input file cannot be read,
     /// or the output file cannot be written to, an error is returned.
-    pub fn compress_file<P: AsRef<Path>>(input_path: P, output_path: P) -> io::Result<()> {
+    pub fn compress_file<P: AsRef<Path>, Q: AsRef<Path>>(
+        input_path: P,
+        output_path: Q,
+    ) -> io::Result<()> {
         let input_file = File::open(input_path)?;
         let output_file = File::create(output_path)?;
         let mut encoder = GzEncoder::new(output_file, Compression::default());

@@ -62,34 +62,45 @@ impl Heartbeat {
     /// use pilgrimage::broker::leader::election::LeaderElection;
     /// use std::collections::HashMap;
     /// use std::time::Duration;
+    /// use std::sync::{Arc, Mutex};
     ///
     /// let peers = HashMap::new();
-    /// let election = LeaderElection::new("broker1", peers);
+    /// let election = Arc::new(Mutex::new(LeaderElection::new("broker1", peers)));
     /// Heartbeat::start(election);
     /// ```
-    pub fn start(election: LeaderElection) {
+    pub fn start(election: Arc<Mutex<LeaderElection>>) {
         let heartbeat = Arc::new(Self::new(Duration::from_secs(1)));
-        let election = Arc::new(election);
 
         // Heartbeat Transmission Thread
         let send_election = election.clone();
         let send_heartbeat = heartbeat.clone();
         std::thread::spawn(move || {
-            while *send_election.state.lock().unwrap() == BrokerState::Leader {
-                Self::send_heartbeat(&send_election);
+            loop {
+                {
+                    let election_guard = send_election.lock().unwrap();
+                    if *election_guard.state.lock().unwrap() != BrokerState::Leader {
+                        break;
+                    }
+                    Self::send_heartbeat(&election_guard);
+                }
                 *send_heartbeat.last_beat.lock().unwrap() = Instant::now();
                 std::thread::sleep(Duration::from_millis(500));
             }
         });
 
         // Heartbeat monitoring thread
-        let monitor_election = election.clone();
-        let monitor_heartbeat = heartbeat.clone();
+        let monitor_election = election;
+        let monitor_heartbeat = heartbeat;
         std::thread::spawn(move || {
-            while *monitor_election.state.lock().unwrap() != BrokerState::Leader {
-                if Self::check_timeout(&monitor_heartbeat) {
-                    println!("Heartbeat timeout, starting election");
-                    monitor_election.start_election();
+            loop {
+                {
+                    let mut election_guard = monitor_election.lock().unwrap();
+                    if *election_guard.state.lock().unwrap() == BrokerState::Leader {
+                        break;
+                    }
+                    if Self::check_timeout(&monitor_heartbeat) {
+                        election_guard.start_election();
+                    }
                 }
                 std::thread::sleep(Duration::from_millis(100));
             }
@@ -117,10 +128,10 @@ impl Heartbeat {
     /// Heartbeat::send_heartbeat(&election);
     /// ```
     pub fn send_heartbeat(election: &LeaderElection) {
-        let peers = election.peers.lock().unwrap();
-        for (peer_id, _) in peers.iter() {
-            println!("Sending heartbeat to peer: {}", peer_id);
-            // TODO Implementing actual network communication here
+        if let Ok(votes) = election.votes.lock() {
+            for (_peer_id, _) in votes.iter() {
+                // TODO Implementing actual network communication here
+            }
         }
     }
 

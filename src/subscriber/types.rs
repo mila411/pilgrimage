@@ -111,6 +111,12 @@ impl Subscriber {
             callback: Arc::new(callback),
         }
     }
+
+    /// Notify the subscriber with a message
+    pub fn notify(&self, message: &str) -> Result<(), String> {
+        (self.callback)(message.to_string());
+        Ok(())
+    }
 }
 
 #[cfg(test)]

@@ -13,3 +13,8 @@
 
 pub mod ack;
 pub mod message;
+pub mod metadata;
+
+pub use self::ack::{MessageAck, AckStatus};
+pub use self::message::Message;
+pub use self::metadata::MessageMetadata;

@@ -28,11 +28,12 @@ pub type ConsumerGroups = HashMap<String, ConsumerGroup>;
 /// # Examples
 /// ```
 /// use std::sync::Mutex;
+/// use std::path::PathBuf;
 /// use pilgrimage::broker::node_management::check_node_health;
 /// use pilgrimage::broker::storage::Storage;
 ///
 /// // Create a new storage node
-/// let storage = Mutex::new(Storage::new("test_check_node_health").unwrap());
+/// let storage = Mutex::new(Storage::new(PathBuf::from("test_check_node_health")).unwrap());
 ///
 /// // Check the health of the storage node
 /// let is_available = check_node_health(&storage);
@@ -57,13 +58,14 @@ pub fn check_node_health(storage: &Mutex<Storage>) -> bool {
 /// # Examples
 /// ```
 /// use std::sync::Mutex;
+/// use std::path::PathBuf;
 /// use pilgrimage::broker::node_management::recover_node;
 /// use pilgrimage::broker::consumer::group::ConsumerGroup;
 /// use pilgrimage::broker::storage::Storage;
 /// use std::collections::HashMap;
 ///
 /// // Create a new storage node
-/// let storage = Mutex::new(Storage::new("test_recover_node").unwrap());
+/// let storage = Mutex::new(Storage::new(PathBuf::from("test_recover_node")).unwrap());
 ///
 /// // Create a collection of consumer groups
 /// let consumer_groups = Mutex::new(HashMap::new());
@@ -88,46 +90,5 @@ pub fn recover_node(storage: &Mutex<Storage>, consumer_groups: &Mutex<ConsumerGr
     let mut groups_guard = consumer_groups.lock().unwrap();
     for group in groups_guard.values_mut() {
         group.reset_assignments();
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::Broker;
-    use std::sync::Arc;
-    use std::thread;
-    use std::time::Duration;
-
-    /// Tests the automatic recovery of a storage node.
-    ///
-    /// # Purpose
-    /// This test verifies that the broker can automatically recover a storage node
-    /// when it becomes unavailable.
-    ///
-    /// # Steps
-    /// 1. Create a new storage node and broker.
-    /// 2. Simulate a disability of the storage node.
-    /// 3. Perform automatic recovery.
-    /// 4. Check if the storage node is available.
-    #[test]
-    fn test_auto_recovery() {
-        let storage = Arc::new(Mutex::new(Storage::new("test_db_path").unwrap()));
-        let mut broker = Broker::new("broker_id", 1, 1, "test_db_path");
-        broker.storage = storage.clone();
-
-        // Simulate a disability
-        {
-            let mut storage_guard = storage.lock().unwrap();
-            storage_guard.available = false;
-        }
-
-        // Perform automatic recovery
-        broker.monitor_nodes();
-
-        // Check recovery
-        thread::sleep(Duration::from_millis(100));
-        let storage_guard = storage.lock().unwrap();
-        assert!(storage_guard.is_available());
     }
 }

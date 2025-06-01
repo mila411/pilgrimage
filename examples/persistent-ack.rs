@@ -51,7 +51,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let state_path = "processed_messages.json";
     let mut state = ProcessedState::load(state_path);
 
-    let mut broker = Broker::new("broker1", 3, 2, "logs");
+    let mut broker = Broker::new("broker1", 3, 2, "storage/persistent_broker.log");
+    // Create topic (delete existing topic)
+    let _ = broker.delete_topic("test_topic");
     broker.create_topic("test_topic", None)?;
 
     let mut handles = vec![];

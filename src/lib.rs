@@ -55,9 +55,8 @@
 //! ## Basic Usage
 //!
 //! ```rust
-//! use pilgrimage::broker::Broker;
-//! use pilgrimage::message::message::Message;
-//! use pilgrimage::schema::registry::SchemaRegistry;
+//! use pilgrimage::broker::{Broker, TopicConfig};
+//! use pilgrimage::schema::{registry::SchemaRegistry, message_schema::MessageSchema};
 //! use std::sync::{Arc, Mutex};
 //! use std::thread;
 //! use std::time::Duration;
@@ -76,7 +75,11 @@
 //!     // Creating a topic
 //!     {
 //!         let mut broker = broker.lock().unwrap();
-//!         broker.create_topic("test_topic", Some(1)).unwrap();
+//!         let config = TopicConfig {
+//!             num_partitions: 1,
+//!             replication_factor: 1,
+//!         };
+//!         broker.create_topic("test_topic", Some(config)).unwrap();
 //!     }
 //!
 //!     // Receiving thread
@@ -84,7 +87,7 @@
 //!     let receiver = thread::spawn(move || {
 //!         for _ in 0..5 {
 //!             let broker = broker_clone.lock().unwrap();
-//!             if let Some(message) = broker.receive_message() {
+//!             if let Ok(Some(message)) = broker.receive_message("test_topic", 0) {
 //!                 println!("Received: {}", message.content);
 //!             }
 //!             drop(broker);
@@ -94,9 +97,12 @@
 //!
 //!     // Sender processing
 //!     for i in 1..=5 {
-//!         let message = Message::new(format!("Message {}", i));
+//!         let message = MessageSchema::new()
+//!             .with_content(format!("Message {}", i))
+//!             .with_topic("test_topic".to_string())
+//!             .with_partition(0);
 //!         {
-//!             let broker = broker.lock().unwrap();
+//!             let mut broker = broker.lock().unwrap();
 //!             broker.send_message(message).unwrap();
 //!             println!("Sent message {}", i);
 //!         }
