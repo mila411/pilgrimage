@@ -932,7 +932,7 @@ mod tests {
         )
         .await;
 
-        // Try to stop a broker that is not running
+        // Try to stop a broker that is not running.
         let req = test::TestRequest::post()
             .uri("/stop")
             .set_json(json!({
