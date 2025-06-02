@@ -47,6 +47,7 @@ parking_lot = "0.12.4"
 glob = "0.3.2"
 tracing = "0.1.41"
 thiserror = "2.0.12"
+reqwest = { version = "0.12.19", features = ["json"] }
 
 [dev-dependencies]
 env_logger = "0.10"
