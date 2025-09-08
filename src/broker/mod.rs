@@ -16,7 +16,13 @@ pub use config::TopicConfig;
 
 // Module declarations
 pub mod cluster;
+pub mod consensus;
 pub mod consumer;
+pub mod data_replication;
+pub mod disaster_recovery;
+pub mod distributed;
+pub mod distributed_storage;
+pub mod dynamic_scaling;
 pub mod error;
 pub mod leader;
 pub mod log_compression;
@@ -24,8 +30,11 @@ pub mod message_queue;
 pub mod metrics;
 pub mod node;
 pub mod node_management;
+pub mod performance_optimizer;
 pub mod replication;
 pub mod scaling;
+pub mod split_brain;
+pub mod split_brain_prevention;
 pub mod storage;
 pub mod topic;
 
@@ -48,12 +57,51 @@ impl Broker {
         num_partitions: usize,
         replication_factor: usize,
         storage_path: &str,
-    ) -> Self {
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        // Convert directory path to file path if necessary
+        let storage_file_path = {
+            let path = std::path::Path::new(storage_path);
+            if path.is_dir() || storage_path.ends_with('/') || !storage_path.contains('.') {
+                // If it's a directory or looks like one, append a default file name
+                let dir_path = PathBuf::from(storage_path);
+                // Ensure the directory exists
+                if let Err(e) = std::fs::create_dir_all(&dir_path) {
+                    // Only treat it as an error if it's not "already exists"
+                    if e.kind() != std::io::ErrorKind::AlreadyExists {
+                        eprintln!(
+                            "Warning: Failed to create storage directory {}: {}",
+                            dir_path.display(),
+                            e
+                        );
+                    }
+                }
+                dir_path.join(format!("{}_broker.log", id))
+            } else {
+                // If it looks like a file path, use it as is
+                let file_path = PathBuf::from(storage_path);
+                // Ensure parent directory exists
+                if let Some(parent) = file_path.parent() {
+                    if let Err(e) = std::fs::create_dir_all(parent) {
+                        // Only treat it as an error if it's not "already exists"
+                        if e.kind() != std::io::ErrorKind::AlreadyExists {
+                            eprintln!(
+                                "Warning: Failed to create parent directory {}: {}",
+                                parent.display(),
+                                e
+                            );
+                        }
+                    }
+                }
+                file_path
+            }
+        };
+
         let storage = Arc::new(Mutex::new(
-            Storage::new(PathBuf::from(storage_path)).expect("Failed to initialize storage"),
+            Storage::new(storage_file_path)
+                .map_err(|e| format!("Failed to initialize storage: {}", e))?,
         ));
 
-        Self {
+        Ok(Self {
             id: id.to_string(),
             num_partitions,
             replication_factor,
@@ -61,7 +109,7 @@ impl Broker {
             topics: Arc::new(Mutex::new(HashMap::new())),
             transaction_in_progress: Arc::new(Mutex::new(false)),
             transaction_messages: Arc::new(Mutex::new(Vec::new())),
-        }
+        })
     }
 
     /// Send a message

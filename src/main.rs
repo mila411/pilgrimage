@@ -1,4 +1,4 @@
-mod web_console;
+use pilgrimage::web_console;
 
 /// The main entry point for the Pilgrimage application.
 ///

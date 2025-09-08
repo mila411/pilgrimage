@@ -100,7 +100,11 @@ fn send_message_to_broker(
         1, // Number of partitions
         1, // Replication factor
         "storage",
-    );
+    )
+    .map_err(|e| CliError::BrokerError {
+        kind: BrokerErrorKind::ConnectionFailed,
+        message: format!("Failed to initialize broker: {}", e),
+    })?;
 
     // Send message and process results
     broker.send_message(schema).map_err(|e| {

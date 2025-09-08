@@ -25,7 +25,7 @@
 //!     3,         // number of partitions
 //!     2,         // replication factor
 //!     "logs"     // storage path
-//! ));
+//! ).expect("Failed to create broker"));
 //!
 //! // Add the broker to the cluster
 //! cluster.add_broker("broker1".to_string(), broker);
@@ -86,8 +86,8 @@ impl Cluster {
     ///     "broker1", // broker ID
     ///     3,         // number of partitions
     ///     2,         // replication factor
-    ///     "logs"     // storage path
-    /// ));
+    ///     "test_storage/cluster_logs1"     // storage path
+    /// ).expect("Failed to create broker"));
     /// // Add the broker to the cluster
     /// cluster.add_broker("broker1".to_string(), broker);
     ///
@@ -118,8 +118,8 @@ impl Cluster {
     ///     "broker1", // broker ID
     ///     3,         // number of partitions
     ///     2,         // replication factor
-    ///     "logs"     // storage path
-    /// ));
+    ///     "test_storage/cluster_logs2"     // storage path
+    /// ).expect("Failed to create broker"));
     /// // Add the broker to the cluster
     /// cluster.add_broker("broker1".to_string(), broker);
     ///
@@ -158,8 +158,8 @@ impl Cluster {
     ///     "broker1", // broker ID
     ///     3,         // number of partitions
     ///     2,         // replication factor
-    ///     "logs"     // storage path
-    /// ));
+    ///     "test_storage/cluster_logs3"     // storage path
+    /// ).expect("Failed to create broker"));
     /// // Add the broker to the cluster
     /// cluster.add_broker("broker1".to_string(), broker);
     ///
@@ -199,8 +199,8 @@ impl Cluster {
     ///     "broker1", // broker ID
     ///     3,         // number of partitions
     ///     2,         // replication factor
-    ///     "logs"     // storage path
-    /// ));
+    ///     "test_storage/cluster_logs4"     // storage path
+    /// ).expect("Failed to create broker"));
     ///
     /// // Add the broker to the cluster
     /// cluster.add_broker("broker1".to_string(), broker);

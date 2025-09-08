@@ -70,7 +70,7 @@
 //!         .unwrap();
 //!
 //!     // Broker Creation
-//!     let broker = Arc::new(Mutex::new(Broker::new("broker1", 3, 2, "logs")));
+//!     let broker = Arc::new(Mutex::new(Broker::new("broker1", 3, 2, "logs").expect("Failed to create broker")));
 //!
 //!     // Creating a topic
 //!     {
@@ -510,10 +510,16 @@
 pub mod amqp_handler;
 pub mod auth;
 pub mod broker;
+pub mod config;
 pub mod crypto;
 pub mod message;
+pub mod monitoring;
+pub mod network;
 pub mod schema;
+pub mod security;
 pub mod subscriber;
+pub mod testing;
+pub mod web_console;
 
 pub use broker::Broker;
 pub use broker::error::BrokerError;

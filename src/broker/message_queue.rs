@@ -12,7 +12,7 @@
 //! use std::thread;
 //!
 //! // Create a new message queue with 1 minimum instance and 10 maximum instances
-//! let message_queue = MessageQueue::new(1, 10, "test_storage").unwrap();
+//! let message_queue = MessageQueue::new(1, 10, "test_storage/queue_example").unwrap();
 //!
 //! // Create a new message
 //! let message = Message::new("Hello, world!".to_string())
@@ -48,6 +48,7 @@ lazy_static! {
 /// This struct is designed to handle high-throughput message processing,
 /// with mechanisms to automatically scale the number of processing instances
 /// based on the current load.
+#[allow(dead_code)]
 pub struct MessageQueue {
     /// The queue of messages to be processed.
     queue: Mutex<VecDeque<Message>>,
@@ -123,7 +124,7 @@ impl MessageQueue {
     /// use tokio::runtime::Runtime;
     ///
     /// // Create a new message queue with 1 minimum instance and 10 maximum instances
-    /// let message_queue = MessageQueue::new(1, 10, "test_storage").unwrap();
+    /// let message_queue = MessageQueue::new(1, 10, "test_storage/push_method").unwrap();
     ///
     /// // Create a new message
     /// let message = Message::new("Hello, world!".to_string())
@@ -143,9 +144,9 @@ impl MessageQueue {
         MESSAGES_RECEIVED.inc();
 
         if queue.len() > 100 {
-            // 仮の閾値、必要に応じて調整
+            // Temporary threshold, adjust as needed
             let metrics = SystemMetrics::new(
-                0.8, // 高負荷を示す値
+                0.8, // High load indicator
                 0.7,
                 queue.len() as f32,
             );
@@ -172,7 +173,7 @@ impl MessageQueue {
     /// use tokio::runtime::Runtime;
     ///
     /// // Create a new message queue with 1 minimum instance and 10 maximum instances
-    /// let message_queue = MessageQueue::new(1, 10, "test_storage").unwrap();
+    /// let message_queue = MessageQueue::new(1, 10, "test_storage/pop").unwrap();
     ///
     /// // Create a new message
     /// let message = Message::new("Hello, world!".to_string())
@@ -242,7 +243,7 @@ impl MessageQueue {
     /// use pilgrimage::message::message::Message;
     ///
     /// // Create a new message queue with 1 minimum instance and 10 maximum instances
-    /// let message_queue = MessageQueue::new(1, 10, "test_storage").unwrap();
+    /// let message_queue = MessageQueue::new(1, 10, "test_storage/send").unwrap();
     ///
     /// // Create a new message
     /// let message = Message::new("Hello, world!".to_string())
@@ -279,7 +280,7 @@ impl MessageQueue {
     /// use pilgrimage::message::message::Message;
     ///
     /// // Create a new message queue with 1 minimum instance and 10 maximum instances
-    /// let message_queue = MessageQueue::new(1, 10, "test_storage").unwrap();
+    /// let message_queue = MessageQueue::new(1, 10, "test_storage/receive").unwrap();
     ///
     /// // Create a new message
     /// let message = Message::new("Hello, world!".to_string())
@@ -331,7 +332,7 @@ impl MessageQueue {
     /// use pilgrimage::message::message::Message;
     ///
     /// // Create a new message queue with 1 minimum instance and 10 maximum instances
-    /// let message_queue = MessageQueue::new(1, 10, "test_storage").unwrap();
+    /// let message_queue = MessageQueue::new(1, 10, "test_storage/partition").unwrap();
     ///
     /// // Create a new message
     /// let message = Message::new("Hello, partitioned world!".to_string())

@@ -33,7 +33,7 @@ pub type ConsumerGroups = HashMap<String, ConsumerGroup>;
 /// use pilgrimage::broker::storage::Storage;
 ///
 /// // Create a new storage node
-/// let storage = Mutex::new(Storage::new(PathBuf::from("test_check_node_health")).unwrap());
+/// let storage = Mutex::new(Storage::new(PathBuf::from("test_storage/test_check_node_health")).unwrap());
 ///
 /// // Check the health of the storage node
 /// let is_available = check_node_health(&storage);
@@ -65,7 +65,7 @@ pub fn check_node_health(storage: &Mutex<Storage>) -> bool {
 /// use std::collections::HashMap;
 ///
 /// // Create a new storage node
-/// let storage = Mutex::new(Storage::new(PathBuf::from("test_recover_node")).unwrap());
+/// let storage = Mutex::new(Storage::new(PathBuf::from("test_storage/test_recover_node")).unwrap());
 ///
 /// // Create a collection of consumer groups
 /// let consumer_groups = Mutex::new(HashMap::new());

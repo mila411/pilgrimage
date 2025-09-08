@@ -42,7 +42,7 @@
 //! // Check if the user has the required permission
 //! assert!(rbac.has_permission(user, &Permission::Read));
 //! // Finally, remove the role from the user
-//! rbac.remove_role(user, role);
+//! rbac.revoke_role(user, role);
 //! // Check if the user still has the required permission
 //! assert!(!rbac.has_permission(user, &Permission::Read));
 //!
@@ -60,9 +60,19 @@
 //! assert_eq!(claims.roles, vec!["admin".to_string()]);
 //! ```
 
+pub mod audit;
 pub mod authentication;
 pub mod authorization;
+pub mod jwt_auth;
 pub mod token;
 
 #[cfg(test)]
 mod tests;
+
+pub use audit::{
+    AuditConfig, AuditEvent, AuditEventType, AuditLogLevel, AuditLogger, AuditQuery,
+    AuditStatistics, EventOutcome,
+};
+pub use authentication::{Authenticator, BasicAuthenticator};
+pub use jwt_auth::{AuthenticationResult, DistributedAuthenticator, ValidationResult};
+pub use token::TokenManager;

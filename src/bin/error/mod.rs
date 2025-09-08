@@ -83,4 +83,13 @@ impl From<std::io::Error> for CliError {
     }
 }
 
+impl From<Box<dyn Error>> for CliError {
+    fn from(err: Box<dyn Error>) -> Self {
+        CliError::BrokerError {
+            kind: BrokerErrorKind::Unknown,
+            message: err.to_string(),
+        }
+    }
+}
+
 pub type CliResult<T> = Result<T, CliError>;

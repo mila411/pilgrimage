@@ -97,7 +97,12 @@ pub async fn handle_start_command(matches: &ArgMatches) -> CliResult<()> {
     );
 
     // Initialize the broker
-    let broker = Broker::new(&id, partitions, replication, &storage);
+    let broker = Broker::new(&id, partitions, replication, &storage).map_err(|e| {
+        Box::new(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            format!("Failed to initialize broker: {}", e),
+        )) as Box<dyn std::error::Error>
+    })?;
     let _broker = Arc::new(Mutex::new(broker));
 
     // Create PID file for the broker process

@@ -147,7 +147,7 @@ mod tests {
         rbac.assign_role("user1", "admin");
         assert!(rbac.has_permission("user1", &Permission::Admin));
 
-        rbac.remove_role("user1", "admin");
+        rbac.revoke_role("user1", "admin");
         assert!(!rbac.has_permission("user1", &Permission::Admin));
     }
 

@@ -249,9 +249,9 @@ mod tests {
         };
 
         manager.handle_metrics_update("test_node", metrics).await;
-        manager.handle_scale_up("テスト用高負荷").await;
+        manager.handle_scale_up("High load for testing").await;
         let nodes = manager.nodes.lock().unwrap();
-        assert!(nodes.len() > initial_count, "ノード数が増加していません");
+        assert!(nodes.len() > initial_count, "Node count has not increased");
     }
 
     #[tokio::test]

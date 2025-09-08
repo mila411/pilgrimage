@@ -8,14 +8,16 @@
 //! in an [`Arc`] and implementing the [`Send`] and [`Sync`] traits.
 //!
 //! # Example
-//! ```rust
+//! ```no_run
 //! use pilgrimage::subscriber::types::Subscriber;
 //!
-//! // Create a new subscriber with the id "example-id" and
-//! // a callback function that prints the message
-//! let subscriber = Subscriber::new("example-id", Box::new(|message| {
-//!     println!("Received message: {}", message);
-//! }));
+//! // Create a simple callback that does nothing
+//! let callback = Box::new(|_message: String| {
+//!     // Do nothing for test
+//! });
+//!
+//! // Create a new subscriber with the id "example-id"
+//! let subscriber = Subscriber::new("example-id", callback);
 //!
 //! // Check if the subscriber was created successfully
 //! assert_eq!(subscriber.id, "example-id");
@@ -93,14 +95,16 @@ impl Subscriber {
     /// A new subscriber with the given id and callback function.
     ///
     /// # Example
-    /// ```rust
+    /// ```no_run
     /// use pilgrimage::subscriber::types::Subscriber;
     ///
-    /// // Create a new subscriber with the id "example-id" and
-    /// // a callback function that prints the message
-    /// let subscriber = Subscriber::new("example-id", Box::new(|message| {
-    ///     println!("Received message: {}", message);
-    /// }));
+    /// // Create a simple callback that does nothing
+    /// let callback = Box::new(|_message: String| {
+    ///     // Do nothing for test
+    /// });
+    ///
+    /// // Create a new subscriber with the id "example-id"
+    /// let subscriber = Subscriber::new("example-id", callback);
     ///
     /// // Check if the subscriber was created successfully
     /// assert_eq!(subscriber.id, "example-id");

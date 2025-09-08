@@ -9,7 +9,8 @@ use tempfile::tempdir;
 async fn test_message_send_receive() {
     let dir = tempdir().unwrap();
     let storage_path = dir.path().to_str().unwrap();
-    let broker = Broker::new("test-broker", 3, 2, storage_path);
+    let broker =
+        Broker::new("test-broker", 3, 2, storage_path).expect("Failed to create test broker");
 
     // Send a test message
     let content = "Hello, World!";
@@ -33,7 +34,8 @@ async fn test_message_send_receive() {
 async fn test_message_with_schema() {
     let dir = tempdir().unwrap();
     let storage_path = dir.path().to_str().unwrap();
-    let broker = Broker::new("test-broker", 3, 2, storage_path);
+    let broker =
+        Broker::new("test-broker", 3, 2, storage_path).expect("Failed to create test broker");
 
     // Create a schema
     let mut schema = MessageSchema::new();
@@ -61,7 +63,8 @@ async fn test_message_with_schema() {
 async fn test_message_acknowledgment() {
     let dir = tempdir().unwrap();
     let storage_path = dir.path().to_str().unwrap();
-    let broker = Broker::new("test-broker", 3, 2, storage_path);
+    let broker =
+        Broker::new("test-broker", 3, 2, storage_path).expect("Failed to create test broker");
 
     // Create and send a message
     let message = Message::new("Test message".to_string())

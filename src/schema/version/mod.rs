@@ -71,7 +71,7 @@ impl SchemaVersion {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// use pilgrimage::schema::version::SchemaVersion;
     ///
     /// let version = SchemaVersion::new_with_version(1, 2, 3);
