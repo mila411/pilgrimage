@@ -6,8 +6,9 @@
 /keys/*
 !/keys/.gitkeep
 !/keys/README.md
-*log*
+logs/
 !log_compression.rs
+!audit_logger.rs
 *old
 tmp
 note.txt
