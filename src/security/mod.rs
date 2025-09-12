@@ -3,6 +3,8 @@
 //! Comprehensive security implementation with TLS/SSL encryption,
 //! fine-grained authorization, and comprehensive audit logging
 
+
+// mod audit_logger;
 mod audit_logger;
 pub mod authorization;
 pub mod modern_tls;
