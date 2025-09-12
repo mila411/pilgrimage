@@ -66,6 +66,7 @@ impl std::error::Error for CryptoError {}
 ///
 /// # See also
 /// - [AES-256-GCM](https://en.wikipedia.org/wiki/Galois/Counter_Mode)
+#[derive(Clone)]
 pub struct Encryptor {
     /// The cipher used for encryption and decryption.
     cipher: Aes256Gcm,

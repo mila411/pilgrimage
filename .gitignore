@@ -1,5 +1,11 @@
 /target
 /logs
+/storage/*
+!/storage/.gitkeep
+/test_storage/*
+/keys/*
+!/keys/.gitkeep
+!/keys/README.md
 *log*
 !log_compression.rs
 *old

@@ -12,22 +12,25 @@
 //! use std::thread;
 //!
 //! // Create a new message queue with 1 minimum instance and 10 maximum instances
-//! let message_queue = MessageQueue::new(1, 10);
+//! let message_queue = MessageQueue::new(1, 10, "test_storage/queue_example").unwrap();
 //!
 //! // Create a new message
-//! let message = Message::new("Hello, world!".to_string());
+//! let message = Message::new("Hello, world!".to_string())
+//!     .with_topic("test_topic".to_string()).with_partition(0);
 //!
-//! // Add the message to the queue
-//! let result = message_queue.push(message);
+//! // Add the message to the queue using send method
+//! let result = message_queue.send(message);
 //! assert!(result.is_ok());
 //! ```
 
-use crate::broker::scaling::AutoScaler;
+use crate::broker::metrics::SystemMetrics;
+use crate::broker::scaling::{ScalingConfig, ScalingManager};
+use crate::broker::storage::Storage;
 use crate::message::message::Message;
 use lazy_static::lazy_static;
 use prometheus::{Counter, register_counter};
-use std::collections::{HashSet, VecDeque};
-use std::sync::{Condvar, Mutex};
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::{Arc, Condvar, Mutex};
 use uuid::Uuid;
 
 lazy_static! {
@@ -45,19 +48,22 @@ lazy_static! {
 /// This struct is designed to handle high-throughput message processing,
 /// with mechanisms to automatically scale the number of processing instances
 /// based on the current load.
+#[allow(dead_code)]
 pub struct MessageQueue {
     /// The queue of messages to be processed.
-    /// This is a FIFO queue that is shared between all processing instances.
     queue: Mutex<VecDeque<Message>>,
     /// The set of message IDs that have already been processed.
-    /// This is used to detect and prevent duplicate messages.
     processed_ids: Mutex<HashSet<Uuid>>,
     /// The auto-scaler for the message queue.
-    /// This is used to automatically scale the number of processing instances.
-    auto_scaler: AutoScaler,
+    auto_scaler: ScalingManager,
     /// The condition variable for the message queue.
-    /// This is used to notify processing instances when new messages are available.
     condvar: Condvar,
+    /// The storage backend for persisting messages.
+    storage: Arc<Mutex<Storage>>,
+    /// The configuration for auto-scaling
+    config: ScalingConfig,
+    /// This allows for processing messages in specific partitions.
+    partition_queues: Mutex<HashMap<(String, usize), VecDeque<Message>>>,
 }
 
 impl MessageQueue {
@@ -66,16 +72,33 @@ impl MessageQueue {
     /// # Arguments
     /// * `min_instances` - The minimum number of processing instances.
     /// * `max_instances` - The maximum number of processing instances.
+    /// * `storage_path` - The file path for storing messages.
     ///
     /// # Returns
     /// A new `MessageQueue` instance with the given scaling parameters.
-    pub fn new(min_instances: usize, max_instances: usize) -> Self {
-        MessageQueue {
+    pub fn new(
+        min_instances: usize,
+        max_instances: usize,
+        storage_path: &str,
+    ) -> std::io::Result<Self> {
+        let config = ScalingConfig {
+            min_nodes: min_instances,
+            max_nodes: max_instances,
+            ..Default::default()
+        };
+
+        Ok(Self {
             queue: Mutex::new(VecDeque::new()),
             processed_ids: Mutex::new(HashSet::new()),
-            auto_scaler: AutoScaler::new(min_instances, max_instances),
+            auto_scaler: {
+                let nodes = Arc::new(Mutex::new(HashMap::new()));
+                ScalingManager::new(nodes, Some(config.clone()))
+            },
             condvar: Condvar::new(),
-        }
+            storage: Arc::new(Mutex::new(Storage::new(storage_path.into())?)),
+            config,
+            partition_queues: Mutex::new(HashMap::new()),
+        })
     }
 
     /// Add a message to the queue and notifies a waiting consumer, if any.
@@ -98,26 +121,39 @@ impl MessageQueue {
     /// use pilgrimage::broker::message_queue::MessageQueue;
     /// use pilgrimage::message::message::Message;
     /// use uuid::Uuid;
+    /// use tokio::runtime::Runtime;
     ///
     /// // Create a new message queue with 1 minimum instance and 10 maximum instances
-    /// let message_queue = MessageQueue::new(1, 10);
+    /// let message_queue = MessageQueue::new(1, 10, "test_storage/push_method").unwrap();
     ///
     /// // Create a new message
-    /// let message = Message::new("Hello, world!".to_string());
+    /// let message = Message::new("Hello, world!".to_string())
+    ///     .with_topic("test_topic".to_string()).with_partition(0);
     ///
     /// // Add the message to the queue
-    /// let result = message_queue.push(message);
+    /// let rt = Runtime::new().unwrap();
+    /// let result = rt.block_on(message_queue.push(message));
     ///
     /// // Check if the message was successfully added to the queue
     /// assert!(result.is_ok());
-    pub fn push(&self, message: Message) -> Result<(), String> {
+    /// ```
+    pub async fn push(&self, message: Message) -> Result<(), String> {
         let mut queue = self.queue.lock().map_err(|e| e.to_string())?;
         queue.push_back(message);
         self.condvar.notify_one();
         MESSAGES_RECEIVED.inc();
 
-        if queue.len() > self.auto_scaler.high_watermark() {
-            self.auto_scaler.scale_up().map_err(|e| e.to_string())?;
+        if queue.len() > 100 {
+            // Temporary threshold, adjust as needed
+            let metrics = SystemMetrics::new(
+                0.8, // High load indicator
+                0.7,
+                queue.len() as f32,
+            );
+            self.auto_scaler
+                .handle_metrics_update("message_queue", metrics)
+                .await;
+            self.auto_scaler.check_and_scale().await;
         }
         Ok(())
     }
@@ -134,31 +170,43 @@ impl MessageQueue {
     /// use pilgrimage::broker::message_queue::MessageQueue;
     /// use pilgrimage::message::message::Message;
     /// use uuid::Uuid;
+    /// use tokio::runtime::Runtime;
     ///
     /// // Create a new message queue with 1 minimum instance and 10 maximum instances
-    /// let message_queue = MessageQueue::new(1, 10);
+    /// let message_queue = MessageQueue::new(1, 10, "test_storage/pop").unwrap();
     ///
     /// // Create a new message
-    /// let message = Message::new("Hello, world!".to_string());
+    /// let message = Message::new("Hello, world!".to_string())
+    ///     .with_topic("test_topic".to_string()).with_partition(0);
     ///
-    /// // Add the message to the queue
-    /// let _ = message_queue.push(message);
+    /// // Add the message to the queue using send method
+    /// let _ = message_queue.send(message);
     ///
     /// // Pop the first message from the queue
-    /// let result = message_queue.pop();
+    /// let rt = Runtime::new().unwrap();
+    /// let result = rt.block_on(message_queue.pop());
     ///
     /// // Check if the message was successfully popped from the queue
     /// assert!(result.is_some());
     /// ```
-    pub fn pop(&self) -> Option<Message> {
+    pub async fn pop(&self) -> Option<Message> {
         let mut queue = self.queue.lock().ok()?;
         while queue.is_empty() {
             queue = self.condvar.wait(queue).ok()?;
         }
         let message = queue.pop_front();
 
-        if queue.len() < self.auto_scaler.low_watermark() {
-            let _ = self.auto_scaler.scale_down();
+        if queue.len() < 50 {
+            // Tentative thresholds, adjust as needed
+            let metrics = SystemMetrics::new(
+                0.3, // Value indicating low load
+                0.4,
+                queue.len() as f32,
+            );
+            let _ = self
+                .auto_scaler
+                .handle_metrics_update("message_queue", metrics)
+                .await;
         }
         message
     }
@@ -195,10 +243,11 @@ impl MessageQueue {
     /// use pilgrimage::message::message::Message;
     ///
     /// // Create a new message queue with 1 minimum instance and 10 maximum instances
-    /// let message_queue = MessageQueue::new(1, 10);
+    /// let message_queue = MessageQueue::new(1, 10, "test_storage/send").unwrap();
     ///
     /// // Create a new message
-    /// let message = Message::new("Hello, world!".to_string());
+    /// let message = Message::new("Hello, world!".to_string())
+    ///     .with_topic("test_topic".to_string()).with_partition(0);
     ///
     /// // Send the message to the queue
     /// let result = message_queue.send(message);
@@ -216,6 +265,7 @@ impl MessageQueue {
         queue.push_back(message.clone());
         processed_ids.insert(message.id);
         MESSAGES_RECEIVED.inc();
+        self.condvar.notify_one();
         Ok(())
     }
 
@@ -230,10 +280,11 @@ impl MessageQueue {
     /// use pilgrimage::message::message::Message;
     ///
     /// // Create a new message queue with 1 minimum instance and 10 maximum instances
-    /// let message_queue = MessageQueue::new(1, 10);
+    /// let message_queue = MessageQueue::new(1, 10, "test_storage/receive").unwrap();
     ///
     /// // Create a new message
-    /// let message = Message::new("Hello, world!".to_string());
+    /// let message = Message::new("Hello, world!".to_string())
+    ///     .with_topic("test_topic".to_string()).with_partition(0);
     ///
     /// // Send the message to the queue
     /// let _ = message_queue.send(message);
@@ -259,5 +310,70 @@ impl MessageQueue {
     pub fn is_empty(&self) -> bool {
         let queue = self.queue.lock().unwrap();
         queue.is_empty()
+    }
+
+    /// Send a message to a specific partition if it has not been processed before.
+    ///
+    /// This method checks for duplicate messages and ensures that each message
+    /// is processed only once. It also persists the message to disk.
+    ///
+    /// # Arguments
+    /// * `message` - The message to send to the partition.
+    /// * `partition_id` - The ID of the partition to send the message to.
+    ///
+    /// # Returns
+    /// An empty `Result` if the message was successfully sent to the partition,
+    /// or an error message if a duplicate message was detected, an error occurred,
+    /// or the message could not be sent to the partition.
+    ///
+    /// # Examples
+    /// ```
+    /// use pilgrimage::broker::message_queue::MessageQueue;
+    /// use pilgrimage::message::message::Message;
+    ///
+    /// // Create a new message queue with 1 minimum instance and 10 maximum instances
+    /// let message_queue = MessageQueue::new(1, 10, "test_storage/partition").unwrap();
+    ///
+    /// // Create a new message
+    /// let message = Message::new("Hello, partitioned world!".to_string())
+    ///     .with_topic("test_topic".to_string()).with_partition(1);
+    ///
+    /// // Send the message to partition 1
+    /// let result = message_queue.send_to_partition(message);
+    ///
+    /// // Check if the message was successfully sent to the partition
+    /// assert!(result.is_ok());
+    /// ```
+    pub fn send_to_partition(&self, message: Message) -> Result<(), String> {
+        let mut processed_ids = self.processed_ids.lock().unwrap();
+        if processed_ids.contains(&message.id) {
+            return Err("Duplicate message detected.".to_string());
+        }
+
+        // Message Persistence
+        if let Err(e) = self.storage.lock().unwrap().write_message(&message) {
+            return Err(format!("Failed to persist message: {}", e));
+        }
+
+        let mut partition_queues = self.partition_queues.lock().unwrap();
+        let queue = partition_queues
+            .entry((message.topic_id.clone(), message.partition_id))
+            .or_insert_with(VecDeque::new);
+        queue.push_back(message.clone());
+
+        processed_ids.insert(message.id);
+        MESSAGES_RECEIVED.inc();
+        self.condvar.notify_one();
+        Ok(())
+    }
+
+    /// Get and remove the first message from the specified partition.
+    pub fn get_from_partition(&self, topic_id: &str, partition_id: usize) -> Option<Message> {
+        let mut partition_queues = self.partition_queues.lock().ok()?;
+        if let Some(queue) = partition_queues.get_mut(&(topic_id.to_string(), partition_id)) {
+            queue.pop_front()
+        } else {
+            None
+        }
     }
 }

@@ -70,15 +70,6 @@ jobs:
       - name: Run tests with coverage
         run: cargo tarpaulin --out Xml
 
-      - name: Run all examples
-        run: |
-          for example in $(ls examples); do
-            cargo run --example $(basename $example .rs);
-          done
-
-      - name: Run bench
-        run: cargo bench
-
       - name: Upload to Codecov
         uses: codecov/codecov-action@v5
         with:

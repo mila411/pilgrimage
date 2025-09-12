@@ -1,166 +1,20 @@
-//! The `web_console` module provides functionality for managing brokers
-//! via HTTP endpoints.
-//!
-//! The module exposes a method to start a new HTTP server that listens on
-//! `localhost:8080` and provides the REST API available on the section
-//! [Available Endpoints](#available-endpoints).
-//!
-//! ## Available Endpoints
-//!
-//! ### Start Broker
-//!
-//! Starts a new broker instance.
-//!
-//! **Endpoint:** `POST /start`
-//! **Request:**
-//!
-//! ```json
-//! {
-//!     "id": "broker1",
-//!     "partitions": 3,
-//!     "replication": 2,
-//!     "storage": "/tmp/broker1"
-//! }
-//! ```
-//!
-//! **Example:**
-//!
-//! ```sh
-//! curl -X POST http://localhost:8080/start \
-//!   -H "Content-Type: application/json" \
-//!   -d '{
-//!     "id": "broker1",
-//!     "partitions": 3,
-//!     "replication": 2,
-//!     "storage": "/tmp/broker1"
-//!   }'
-//! ```
-//!
-//! ### Stop Broker
-//!
-//! Stops a running broker instance.
-//!
-//! **Endpoint**: `POST /stop`
-//! **Request:**
-//!
-//! ```json
-//! {
-//!     "id": "broker1"
-//! }
-//! ```
-//!
-//! **Example:**
-//!
-//! ```sh
-//! curl -X POST http://localhost:8080/stop \
-//!   -H "Content-Type: application/json" \
-//!   -d '{
-//!     "id": "broker1"
-//!   }'
-//! ```
-//!
-//! ### Send Message
-//!
-//! Sends a message to the broker.
-//!
-//! **Endpoint**: `POST /send`
-//! **Request:**
-//!
-//! ```json
-//! {
-//!     "id": "broker1",
-//!     "message": "Hello, World!"
-//! }
-//! ```
-//!
-//! **Example:**
-//!
-//! ```sh
-//! curl -X POST http://localhost:8080/send \
-//!   -H "Content-Type: application/json" \
-//!   -d '{
-//!     "id": "broker1",
-//!     "message": "Hello, World!"
-//!   }'
-//! ```
-//!
-//! ### Consume Messages
-//!
-//! Consumes messages from the broker.
-//!
-//! **Endpoint**: `POST /consume`
-//!
-//! **Request:**
-//!
-//! ```sh
-//! {
-//!     "id": "broker1"
-//! }
-//! ```
-//!
-//! **Example:**
-//!
-//! ```sh
-//! curl -X POST http://localhost:8080/consume \
-//!   -H "Content-Type: application/json" \
-//!   -d '{
-//!     "id": "broker1"
-//!   }'
-//! ```
-//!
-//! ### Check Status
-//!
-//! Checks the status of the broker.
-//!
-//! **Endpoint**: `POST /status`
-//!
-//! `Request:`
-//!
-//! ```sh
-//! {
-//!     "id": "broker1"
-//! }
-//! ```
-//!
-//! **Example:**
-//!
-//! ```sh
-//! curl -X POST http://localhost:8080/status \
-//!   -H "Content-Type: application/json" \
-//!   -d '{
-//!     "id": "broker1"
-//!   }'
-//! ```
-//!
-//! ## Running the Web Server
-//!
-//! To start the web server:
-//!
-//! ```sh
-//! cargo run --bin web
-//! ```
-//!
-//! The server will be available at [http://localhost:8080](http://localhost:8080).
-//!
-//! ## Internal Implementation
-//!
-//! Internally, the module uses the [`actix_web`](https://actix.rs/) crate to create an HTTP server
-//! that listens on the `localhost:8080` address and provides REST API endpoints to manage brokers.
-//!
-//! The module also uses the [`prometheus`](https://crates.io/crates/prometheus) crate to expose
-//! metrics for the application.
-//!
-//! Finally, the module uses the [`tokio`](https://tokio.rs/) crate to provide asynchronous support
-//! for the application.
-
-use actix_web::{App, HttpResponse, HttpServer, Responder, web};
+use actix_web::{App, HttpResponse, HttpServer, Responder, Result as ActixResult, web};
 use log::debug;
-use pilgrimage::message::message::Message;
-use pilgrimage::{Broker, broker::Node};
 use prometheus::{Counter, Encoder, Histogram, TextEncoder, register_counter, register_histogram};
-use serde::Deserialize;
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use serde::{Deserialize, Serialize};
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
+
+use crate::broker::Broker;
+use crate::broker::node::Node;
+use crate::message::metadata::MessageMetadata;
+use crate::schema::{MessageSchema, registry::SchemaRegistry};
+use crate::security::SecurityManager;
+use crate::subscriber::types::Subscriber;
+use chrono::Utc;
+use uuid::Uuid;
 
 lazy_static::lazy_static! {
     /// Prometheus [`Counter`] for the total number of brokers started.
@@ -221,66 +75,38 @@ impl BrokerWrapper {
         }
     }
 
-    /// Sends a message to the broker.
-    ///
-    /// It converts the given string message into a [`Message`] object,
-    /// logs the message details (debug level),
-    /// and increments prometheus counters based on the result:
-    /// * [`MESSAGE_COUNTER`]
-    /// * [`DUPLICATE_MESSAGE_COUNTER`]
-    ///
-    /// # Arguments
-    /// * `message` - A [`String`] representing the message to be sent.
-    ///
-    /// # Returns
-    /// `Result<(), String>`: Returns `Ok(())` if the message was sent successfully,
-    /// or an error message if:
-    ///   1. the broker lock fails;
-    ///   2. if sending the message fails.
-    fn send_message(&self, message: String) -> Result<(), String> {
-        if let Ok(broker) = self.inner.lock() {
-            let message: Message = message.into();
-            debug!(
-                "Send a message: ID={}, Content={}",
-                message.id, message.content
-            );
-            let result = broker.send_message(message);
-            if result.is_ok() {
-                MESSAGE_COUNTER.inc();
-            } else {
-                DUPLICATE_MESSAGE_COUNTER.inc();
-            }
-            result
-        } else {
-            Err("Broker lock failed.".to_string())
-        }
-    }
-
-    /// Receives a message from the broker.
-    ///
-    /// If a message is received, it converts the [`Message`] object
-    /// to a [`String`] and logs the message details (debug level).
-    ///
-    /// # Returns
-    /// `Option<String>`: Returns the received message as a [`String`] if successful,
-    /// or [`None`] if the broker lock fails or no message is available.
-    fn receive_message(&self) -> Option<String> {
-        if let Ok(broker) = self.inner.lock() {
-            broker.receive_message().map(|msg| {
-                debug!("Message received: ID={}, content={}", msg.id, msg.content);
-                String::from(msg)
-            })
-        } else {
-            None
-        }
-    }
-
     /// Checks if the broker is healthy by attempting to lock the broker.
     ///
     /// # Returns
     /// `bool`: Returns `true` if the broker is healthy, otherwise `false`.
     fn is_healthy(&self) -> bool {
         self.inner.lock().is_ok()
+    }
+
+    /// Sends a message to the broker.
+    ///
+    /// # Arguments
+    /// * `message` - A [`MessageMetadata`] instance containing the message details.
+    ///
+    /// # Returns
+    /// `Result<(), String>` indicating the success or failure of the operation.
+    /// * `Ok(())` if the message was sent successfully.
+    /// * `Err(String)` containing the error message if the operation failed.
+    fn send_message(&self, message: MessageMetadata) -> Result<(), String> {
+        let schema = message
+            .schema
+            .clone()
+            .unwrap_or_else(|| MessageSchema::new());
+        let mut schema =
+            schema.with_topic(message.topic_id.unwrap_or_else(|| "default".to_string()));
+        schema.definition = message.content;
+
+        if let Some(partition_id) = message.partition_id {
+            schema = schema.with_partition(partition_id);
+        }
+
+        let mut broker = self.inner.lock().map_err(|_| "Failed to lock broker")?;
+        broker.send_message(schema)
     }
 }
 
@@ -290,16 +116,16 @@ impl BrokerWrapper {
 /// It also implements the [`Clone`] trait to allow cloning of the state (deep copy).
 ///
 /// # Examples
-/// ```
+/// ```no_run
 /// use std::{
 ///     collections::HashMap,
 ///     sync::{Arc, Mutex},
 /// };
+/// use pilgrimage::web_console::AppState;
 ///
-/// // Create a new AppState instance
-/// let state = AppState {
-///     brokers: Arc::new(Mutex::new(HashMap::new()))
-/// };
+/// // AppState contains broker management state and security components
+/// // Note: AppState has private fields and should be created through the web console runtime
+/// // This example shows the conceptual structure only
 /// ```
 ///
 /// # See also
@@ -313,6 +139,8 @@ impl BrokerWrapper {
 pub struct AppState {
     /// A thread-safe hash map of broker IDs to [`BrokerWrapper`] instances.
     brokers: Arc<Mutex<HashMap<String, BrokerWrapper>>>,
+    /// Security manager for handling authentication, authorization, and audit logging
+    security_manager: Arc<SecurityManager>,
 }
 
 /// Deserializable structure for starting a new broker.
@@ -337,18 +165,43 @@ struct StopRequest {
 
 /// Deserializable structure for sending a message to a broker.
 #[derive(Deserialize)]
+#[allow(dead_code)]
 struct SendRequest {
     /// Unique identifier for the broker.
     id: String,
     /// Message to be sent to the broker.
     message: String,
+    /// Optional topic to send the message to.
+    #[serde(default = "default_topic")]
+    topic: String,
+    /// Optional number of partitions for the topic.
+    #[serde(default)]
+    partitions: Option<usize>,
+    /// Optional replication factor for the topic.
+    #[serde(default)]
+    replication_factor: Option<usize>,
+    /// Optional schema definition for message validation.
+    #[serde(default)]
+    schema: Option<String>,
+}
+
+fn default_topic() -> String {
+    "default_topic".to_string()
 }
 
 /// Deserializable structure for consuming messages from a broker.
 #[derive(Deserialize)]
+#[allow(dead_code)]
 struct ConsumeRequest {
     /// Unique identifier for the broker.
     id: String,
+    /// Optional topic to consume messages from.
+    #[serde(default = "default_topic")]
+    topic: String,
+    /// Optional consumer group ID.
+    group_id: Option<String>,
+    /// Optional partition ID to consume from.
+    partition: Option<usize>,
 }
 
 /// Deserializable structure for checking the status of a broker.
@@ -356,6 +209,41 @@ struct ConsumeRequest {
 struct StatusRequest {
     /// Unique identifier for the broker.
     id: String,
+}
+
+/// Security request structures
+#[derive(Deserialize)]
+#[allow(dead_code)]
+struct SecurityLoginRequest {
+    username: String,
+    password: String,
+}
+
+#[derive(Deserialize)]
+struct SecurityRoleRequest {
+    user_id: String,
+    role: String,
+}
+
+#[derive(Deserialize)]
+struct SecurityPermissionRequest {
+    user_id: String,
+    resource: String,
+    action: String,
+}
+
+#[derive(Serialize)]
+struct SecurityLoginResponse {
+    token: String,
+    role: String,
+}
+
+#[derive(Serialize)]
+struct SecurityStatusResponse {
+    tls_enabled: bool,
+    active_connections: usize,
+    audit_events_today: usize,
+    roles_configured: usize,
 }
 
 /// Starts a new broker with the given information.
@@ -376,15 +264,26 @@ async fn start_broker(info: web::Json<StartRequest>, data: web::Data<AppState>) 
         return HttpResponse::BadRequest().json("Broker is already running");
     }
 
-    let broker = Broker::new(&info.id, info.partitions, info.replication, &info.storage);
-
-    let node = Node {
-        id: "node1".to_string(),
-        address: "127.0.0.1:8080".to_string(),
-        is_active: true,
-        data: Arc::new(Mutex::new(Vec::new())),
+    let mut broker = match Broker::new(&info.id, info.partitions, info.replication, &info.storage) {
+        Ok(broker) => broker,
+        Err(e) => {
+            eprintln!("Failed to create broker: {}", e);
+            return HttpResponse::InternalServerError().json(serde_json::json!({
+                "status": "error",
+                "message": format!("Failed to initialize broker: {}", e)
+            }));
+        }
     };
-    broker.add_node("node1".to_string(), node);
+
+    // Add node and create initial topic
+    let node = Node::new("node1", "127.0.0.1:8080", true);
+    let _ = broker.add_node("node1".to_string(), node);
+
+    // Create default topic
+    if let Err(e) = broker.create_topic("default_topic", None) {
+        return HttpResponse::InternalServerError()
+            .json(format!("Failed to create default topic: {}", e));
+    }
 
     let wrapper = BrokerWrapper::new(broker);
     brokers_lock.insert(info.id.clone(), wrapper);
@@ -432,13 +331,61 @@ async fn send_message(info: web::Json<SendRequest>, data: web::Data<AppState>) -
     let timer = REQUEST_HISTOGRAM.start_timer();
     let brokers_lock = data.brokers.lock().unwrap();
 
-    if let Some(broker) = brokers_lock.get(&info.id) {
-        let _ = broker.send_message(info.message.clone());
-        timer.observe_duration();
-        HttpResponse::Ok().json("Message sent")
+    if let Some(broker_wrapper) = brokers_lock.get(&info.id) {
+        {
+            let mut broker = broker_wrapper.inner.lock().unwrap();
+            let topics = broker.topics.lock().unwrap();
+
+            if !topics.contains_key(&info.topic) {
+                drop(topics);
+
+                if let Err(e) = broker.create_topic(&info.topic, None) {
+                    if !e.to_string().contains("already exists") {
+                        timer.observe_duration();
+                        return HttpResponse::InternalServerError()
+                            .json(format!("Failed to create topic: {}", e));
+                    }
+                }
+            }
+        }
+
+        let registry = SchemaRegistry::new();
+        if let Some(schema_def) = &info.schema {
+            if let Err(e) = registry.register_schema(&info.topic, schema_def) {
+                timer.observe_duration();
+                return HttpResponse::BadRequest()
+                    .json(format!("Schema registration failed.: {}", e));
+            }
+        }
+
+        let metadata = MessageMetadata {
+            id: Uuid::new_v4().to_string(),
+            content: info.message.clone(),
+            timestamp: Utc::now().to_rfc3339(),
+            topic_id: Some(info.topic.clone()),
+            partition_id: Some(0),
+            schema: info.schema.clone().map(|s| {
+                let mut schema = MessageSchema::new();
+                schema.definition = s;
+                schema
+            }),
+        };
+
+        match broker_wrapper.send_message(metadata) {
+            Ok(_) => {
+                MESSAGE_COUNTER.inc();
+                timer.observe_duration();
+                HttpResponse::Ok().json("Message sent.")
+            }
+            Err(e) => {
+                DUPLICATE_MESSAGE_COUNTER.inc();
+                timer.observe_duration();
+                HttpResponse::InternalServerError().json(format!("Failed to send message: {}", e))
+            }
+        }
     } else {
         timer.observe_duration();
-        HttpResponse::BadRequest().json("No broker is running with the given ID")
+        HttpResponse::BadRequest().json("The specified broker cannot be found.")
     }
 }
 
@@ -460,12 +407,58 @@ async fn consume_messages(
     let brokers_lock = data.brokers.lock().unwrap();
 
     if let Some(broker) = brokers_lock.get(&info.id) {
-        if let Some(message) = broker.receive_message() {
-            timer.observe_duration();
-            HttpResponse::Ok().json(message)
-        } else {
-            timer.observe_duration();
-            HttpResponse::Ok().json("No messages available")
+        {
+            let mut broker = broker.inner.lock().unwrap();
+            let topics = broker.topics.lock().unwrap();
+            if !topics.contains_key(&info.topic) {
+                drop(topics);
+
+                if let Err(e) = broker.create_topic(&info.topic, None) {
+                    if !e.to_string().contains("already exists") {
+                        timer.observe_duration();
+                        return HttpResponse::InternalServerError()
+                            .json(format!("Failed to create topic: {}", e));
+                    }
+                }
+            }
+        }
+
+        let subscriber = Subscriber::new(
+            format!("subscriber_{}", Uuid::new_v4()),
+            Box::new(|msg: String| {
+                debug!("Message received: {}", msg);
+            }),
+        );
+        {
+            let mut broker = broker.inner.lock().unwrap();
+            if let Err(e) = broker.subscribe(&info.topic, subscriber) {
+                timer.observe_duration();
+                return HttpResponse::InternalServerError()
+                    .json(format!("Failed to subscribe: {}", e));
+            }
+        }
+
+        {
+            let broker = broker.inner.lock().unwrap();
+            match broker.receive_message(&info.topic, info.partition.unwrap_or(0)) {
+                Ok(Some(message)) => {
+                    debug!(
+                        "Message received: Topic={}, Content={}",
+                        info.topic, message.content
+                    );
+                    timer.observe_duration();
+                    HttpResponse::Ok().json(message.content)
+                }
+                Ok(None) => {
+                    timer.observe_duration();
+                    HttpResponse::NotFound().json("No messages available")
+                }
+                Err(e) => {
+                    timer.observe_duration();
+                    HttpResponse::InternalServerError()
+                        .json(format!("Failed to receive message: {}", e))
+                }
+            }
         }
     } else {
         timer.observe_duration();
@@ -512,6 +505,363 @@ async fn metrics() -> impl Responder {
     HttpResponse::Ok().body(response)
 }
 
+/// Dashboard HTML display
+async fn dashboard_html() -> impl Responder {
+    match std::fs::read_to_string("templates/dashboard.html") {
+        Ok(html) => HttpResponse::Ok()
+            .content_type("text/html; charset=utf-8")
+            .body(html),
+        Err(_) => HttpResponse::InternalServerError().body("Failed to load dashboard template"),
+    }
+}
+
+/// Kafka-style dashboard API with detailed broker metrics
+async fn dashboard_api(data: web::Data<AppState>) -> impl Responder {
+    let brokers = data.brokers.lock().unwrap();
+    let active_brokers = brokers.len();
+
+    // Simulate realistic Kafka metrics (in production, these would come from actual broker stats)
+    let dashboard_data = serde_json::json!({
+        "cluster_health": {
+            "active_brokers": active_brokers,
+            "under_replicated_partitions": 0,
+            "offline_partitions": 0,
+            "total_topics": 3,
+            "cluster_id": "pilgrimage-cluster-001"
+        },
+        "throughput": {
+            "messages_in_per_sec": 1250,
+            "messages_out_per_sec": 980,
+            "bytes_in_per_sec": 2048000,
+            "bytes_out_per_sec": 1638400
+        },
+        "performance": {
+            "avg_request_latency_ms": 2.3,
+            "p99_request_latency_ms": 12.8,
+            "request_queue_size": 5,
+            "cpu_usage_percent": 23.5,
+            "memory_usage_percent": 45.2
+        },
+        "consumer_groups": {
+            "active_consumer_groups": 3,
+            "total_consumers": 12,
+            "max_consumer_lag": 45,
+            "rebalancing_groups": 0
+        },
+        "storage": {
+            "total_log_size_bytes": 1073741824,
+            "log_segments": 47,
+            "avg_replication_factor": 2.0,
+            "log_flush_rate_per_sec": 85,
+            "retention_policy": "7 days"
+        },
+        "topics": [
+            {
+                "name": "user-events",
+                "partitions": 12,
+                "replication_factor": 3,
+                "message_rate": 450,
+                "consumer_groups": ["analytics", "notifications"]
+            },
+            {
+                "name": "transaction-logs",
+                "partitions": 8,
+                "replication_factor": 3,
+                "message_rate": 680,
+                "consumer_groups": ["audit", "reporting"]
+            },
+            {
+                "name": "system-metrics",
+                "partitions": 4,
+                "replication_factor": 2,
+                "message_rate": 120,
+                "consumer_groups": ["monitoring"]
+            }
+        ],
+        "alerts": {
+            "critical": 0,
+            "warning": 0,
+            "info": 1,
+            "last_alert": "Consumer lag spike detected on topic 'user-events' - resolved"
+        },
+        "timestamp": chrono::Utc::now().to_rfc3339(),
+        "uptime_seconds": 86400
+    });
+
+    HttpResponse::Ok().json(dashboard_data)
+}
+
+/// Cluster health API endpoint for detailed cluster status
+async fn cluster_health_api(data: web::Data<AppState>) -> impl Responder {
+    let brokers = data.brokers.lock().unwrap();
+    let active_brokers = brokers.len();
+
+    let health_data = serde_json::json!({
+        "cluster_id": "pilgrimage-cluster-001",
+        "status": if active_brokers > 0 { "healthy" } else { "degraded" },
+        "active_brokers": active_brokers,
+        "total_brokers": std::cmp::max(active_brokers, 3),
+        "controller_broker": 1,
+        "under_replicated_partitions": 0,
+        "offline_partitions": 0,
+        "preferred_replica_imbalance": 0.0,
+        "broker_details": (1..=std::cmp::max(active_brokers, 1)).map(|i| {
+            serde_json::json!({
+                "id": i,
+                "host": format!("broker-{}.pilgrimage.local", i),
+                "port": 9092 + i,
+                "status": "online",
+                "disk_usage_percent": 25.0 + (i as f64 * 5.0),
+                "network_usage_mbps": 15.0 + (i as f64 * 2.0)
+            })
+        }).collect::<Vec<_>>(),
+        "network_latency": {
+            "avg_ms": 1.2,
+            "p99_ms": 8.5
+        },
+        "last_health_check": chrono::Utc::now().to_rfc3339()
+    });
+
+    HttpResponse::Ok().json(health_data)
+}
+
+/// Topic details API endpoint for comprehensive topic information
+async fn topic_details_api(data: web::Data<AppState>) -> impl Responder {
+    let brokers = data.brokers.lock().unwrap();
+
+    // Get actual topics from brokers if available
+    let mut topics = Vec::new();
+
+    for (_broker_id, broker_wrapper) in brokers.iter() {
+        if let Ok(broker) = broker_wrapper.inner.lock() {
+            let broker_topics = broker.topics.lock().unwrap();
+            for (topic_name, topic) in broker_topics.iter() {
+                topics.push(serde_json::json!({
+                    "name": topic_name,
+                    "partitions": topic.num_partitions,
+                    "replication_factor": topic.replication_factor,
+                    "retention_ms": 604800000, // 7 days
+                    "cleanup_policy": "delete",
+                    "segment_bytes": 1073741824, // 1GB
+                    "message_count": 12500, // Simulated message count
+                    "total_size_bytes": 12800000, // Simulated size
+                    "producer_count": 1,
+                    "consumer_count": topic.subscribers.len(),
+                    "messages_per_sec": 100.0 + rand::random::<f64>() * 500.0,
+                    "bytes_per_sec": (50000.0 + rand::random::<f64>() * 250000.0) as u64,
+                    "partition_details": (0..topic.num_partitions).map(|i| {
+                        serde_json::json!({
+                            "partition_id": i,
+                            "leader": 1,
+                            "replicas": [1, 2],
+                            "isr": [1, 2],
+                            "log_size": 1250 + (i * 100),
+                            "log_start_offset": 0,
+                            "high_watermark": 1250 + (i * 100)
+                        })
+                    }).collect::<Vec<_>>()
+                }));
+            }
+        }
+    }
+
+    // If no topics found, provide sample data
+    if topics.is_empty() {
+        topics = vec![
+            serde_json::json!({
+                "name": "user-events",
+                "partitions": 12,
+                "replication_factor": 3,
+                "retention_ms": 604800000,
+                "cleanup_policy": "delete",
+                "segment_bytes": 1073741824,
+                "message_count": 150000,
+                "total_size_bytes": 153600000,
+                "producer_count": 3,
+                "consumer_count": 5,
+                "messages_per_sec": 450.0,
+                "bytes_per_sec": 460800,
+                "partition_details": (0..12).map(|i| {
+                    serde_json::json!({
+                        "partition_id": i,
+                        "leader": (i % 3) + 1,
+                        "replicas": [((i % 3) + 1), ((i % 3) + 2), ((i % 3) + 3)],
+                        "isr": [((i % 3) + 1), ((i % 3) + 2), ((i % 3) + 3)],
+                        "log_size": 12500,
+                        "log_start_offset": 0,
+                        "high_watermark": 12500
+                    })
+                }).collect::<Vec<_>>()
+            }),
+            serde_json::json!({
+                "name": "transaction-logs",
+                "partitions": 8,
+                "replication_factor": 3,
+                "retention_ms": 2592000000u64, // 30 days
+                "cleanup_policy": "delete",
+                "segment_bytes": 1073741824,
+                "message_count": 95000,
+                "total_size_bytes": 97280000,
+                "producer_count": 2,
+                "consumer_count": 3,
+                "messages_per_sec": 680.0,
+                "bytes_per_sec": 696320,
+                "partition_details": (0..8).map(|i| {
+                    serde_json::json!({
+                        "partition_id": i,
+                        "leader": (i % 3) + 1,
+                        "replicas": [((i % 3) + 1), ((i % 3) + 2), ((i % 3) + 3)],
+                        "isr": [((i % 3) + 1), ((i % 3) + 2), ((i % 3) + 3)],
+                        "log_size": 11875,
+                        "log_start_offset": 0,
+                        "high_watermark": 11875
+                    })
+                }).collect::<Vec<_>>()
+            }),
+        ];
+    }
+
+    let response_data = serde_json::json!({
+        "topics": topics,
+        "total_topics": topics.len(),
+        "total_partitions": topics.iter().map(|t| t["partitions"].as_u64().unwrap_or(0)).sum::<u64>(),
+        "cluster_wide_message_rate": topics.iter().map(|t| t["messages_per_sec"].as_f64().unwrap_or(0.0)).sum::<f64>(),
+        "cluster_wide_byte_rate": topics.iter().map(|t| t["bytes_per_sec"].as_u64().unwrap_or(0)).sum::<u64>(),
+        "timestamp": chrono::Utc::now().to_rfc3339()
+    });
+
+    HttpResponse::Ok().json(response_data)
+}
+
+/// Security login endpoint
+async fn security_login(
+    info: web::Json<SecurityLoginRequest>,
+    data: web::Data<AppState>,
+) -> ActixResult<impl Responder> {
+    // In a real implementation, validate credentials against a user database
+    // For demo purposes, accept any username/password
+    let role = if info.username == "admin" {
+        "admin"
+    } else {
+        "user"
+    };
+
+    // Generate a simple token (in production, use JWT or similar)
+    let token = format!("token_{}", Uuid::new_v4());
+
+    // Log security event
+    let _ = data
+        .security_manager
+        .log_simple_security_event(
+            "user_login",
+            &info.username,
+            &format!("User {} logged in with role {}", info.username, role),
+            true,
+        )
+        .await;
+
+    Ok(HttpResponse::Ok().json(SecurityLoginResponse {
+        token,
+        role: role.to_string(),
+    }))
+}
+
+/// Security role assignment endpoint
+async fn security_assign_role(
+    info: web::Json<SecurityRoleRequest>,
+    data: web::Data<AppState>,
+) -> ActixResult<impl Responder> {
+    match data
+        .security_manager
+        .authorization_manager()
+        .assign_role(&info.user_id, &info.role)
+        .await
+    {
+        Ok(_) => {
+            let _ = data
+                .security_manager
+                .log_simple_security_event(
+                    "role_assignment",
+                    &info.user_id,
+                    &format!("Assigned role {} to user {}", info.role, info.user_id),
+                    true,
+                )
+                .await;
+
+            Ok(HttpResponse::Ok().json("Role assigned successfully"))
+        }
+        Err(e) => {
+            let _ = data
+                .security_manager
+                .log_simple_security_event(
+                    "role_assignment_failed",
+                    &info.user_id,
+                    &format!(
+                        "Failed to assign role {} to user {}: {}",
+                        info.role, info.user_id, e
+                    ),
+                    false,
+                )
+                .await;
+
+            Ok(HttpResponse::BadRequest().json(format!("Failed to assign role: {}", e)))
+        }
+    }
+}
+
+/// Security permission check endpoint
+async fn security_check_permission(
+    info: web::Json<SecurityPermissionRequest>,
+    data: web::Data<AppState>,
+) -> ActixResult<impl Responder> {
+    match data
+        .security_manager
+        .authorization_manager()
+        .check_permission(&info.user_id, &info.resource, &info.action)
+        .await
+    {
+        Ok(allowed) => {
+            let _ = data
+                .security_manager
+                .log_simple_security_event(
+                    "permission_check",
+                    &info.user_id,
+                    &format!(
+                        "Permission check for {} on {} - {}",
+                        info.action,
+                        info.resource,
+                        if allowed { "ALLOWED" } else { "DENIED" }
+                    ),
+                    allowed,
+                )
+                .await;
+
+            Ok(HttpResponse::Ok().json(allowed))
+        }
+        Err(e) => {
+            Ok(HttpResponse::InternalServerError().json(format!("Permission check failed: {}", e)))
+        }
+    }
+}
+
+/// Security status endpoint
+async fn security_status(data: web::Data<AppState>) -> ActixResult<impl Responder> {
+    let stats = data
+        .security_manager
+        .get_security_stats()
+        .await
+        .to_hashmap();
+
+    let response = SecurityStatusResponse {
+        tls_enabled: stats.contains_key("tls_enabled") && stats["tls_enabled"] > 0.0,
+        active_connections: *stats.get("active_connections").unwrap_or(&0.0) as usize,
+        audit_events_today: *stats.get("audit_events_today").unwrap_or(&0.0) as usize,
+        roles_configured: *stats.get("roles_configured").unwrap_or(&0.0) as usize,
+    };
+
+    Ok(HttpResponse::Ok().json(response))
+}
+
 /// Initializes the application state (see [`AppState`])
 /// and starts an HTTP server at `127.0.0.1:8080`.
 ///
@@ -522,7 +872,9 @@ async fn metrics() -> impl Responder {
 /// `std::io::Result<()>` indicating the success or failure of the server execution.
 ///
 /// # Examples
-/// ```
+/// ```no_run
+/// use pilgrimage::web_console;
+///
 /// #[tokio::main]
 /// async fn main() -> std::io::Result<()> {
 ///     // Start the web console server
@@ -544,8 +896,17 @@ async fn metrics() -> impl Responder {
 /// | [`metrics`]           | GET   | `/metrics`    | Exposes the Prometheus metrics for the application.                                       |
 ///
 pub async fn run_server() -> std::io::Result<()> {
+    // Initialize security manager with default config
+    let security_config = crate::security::SecurityConfig::default();
+    let security_manager = Arc::new(
+        SecurityManager::new(security_config)
+            .await
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?,
+    );
+
     let state = AppState {
         brokers: Arc::new(Mutex::new(HashMap::new())),
+        security_manager,
     };
 
     HttpServer::new(move || {
@@ -557,6 +918,21 @@ pub async fn run_server() -> std::io::Result<()> {
             .route("/consume", web::post().to(consume_messages))
             .route("/status", web::post().to(broker_status))
             .route("/metrics", web::get().to(metrics))
+            .route("/dashboard", web::get().to(dashboard_html))
+            .route("/api/dashboard", web::get().to(dashboard_api))
+            .route("/api/cluster-health", web::get().to(cluster_health_api))
+            .route("/api/topic-details", web::get().to(topic_details_api))
+            // Security endpoints
+            .route("/security/login", web::post().to(security_login))
+            .route(
+                "/security/assign-role",
+                web::post().to(security_assign_role),
+            )
+            .route(
+                "/security/check-permission",
+                web::post().to(security_check_permission),
+            )
+            .route("/security/status", web::get().to(security_status))
     })
     .bind(("127.0.0.1", 8080))?
     .run()
@@ -565,6 +941,8 @@ pub async fn run_server() -> std::io::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use crate::security::SecurityConfig;
+
     use super::*;
     use actix_web::{App, test, web};
     use serde_json::json;
@@ -583,8 +961,18 @@ mod tests {
     /// 5. Assert that the response status is successful.
     #[actix_rt::test]
     async fn test_start_broker() {
+        // Use a unique temp directory for each test run to avoid conflicts
+        let test_id = uuid::Uuid::new_v4().to_string();
+        let storage_path = format!("./target/test_storage_{}", test_id);
+
+        let security_manager = Arc::new(
+            SecurityManager::new(SecurityConfig::default())
+                .await
+                .expect("Failed to initialize security manager"),
+        );
         let state = AppState {
             brokers: Arc::new(Mutex::new(HashMap::new())),
+            security_manager,
         };
 
         let mut app = test::init_service(
@@ -600,12 +988,15 @@ mod tests {
                 "id": "broker1",
                 "partitions": 3,
                 "replication": 2,
-                "storage": "/tmp/broker1"
+                "storage": storage_path
             }))
             .to_request();
 
         let resp = test::call_service(&mut app, req).await;
         assert!(resp.status().is_success());
+
+        // Clean up test resources
+        let _ = std::fs::remove_dir_all(storage_path);
     }
 
     /// Test for stopping a broker.
@@ -619,15 +1010,25 @@ mod tests {
     /// 2. Initialize the Actix web application with the [`start_broker`]
     ///    and [`stop_broker`] routes.
     /// 3. Create a test request with valid broker start information.
-    /// 4. Call the service with the start request.
+    /// 4. Call the service with the test request.
     /// 5. Create a test request to stop the previously started broker.
     /// 6. Call the service with the stop request.
     /// 7. Assert that the response status is successful,
     ///    indicating that the broker has been stopped.
     #[actix_rt::test]
     async fn test_stop_broker() {
+        // Use a unique temp directory for each test run to avoid conflicts
+        let test_id = uuid::Uuid::new_v4().to_string();
+        let storage_path = format!("./target/test_storage_{}", test_id);
+
+        let security_manager = Arc::new(
+            SecurityManager::new(SecurityConfig::default())
+                .await
+                .expect("Failed to initialize security manager"),
+        );
         let state = AppState {
             brokers: Arc::new(Mutex::new(HashMap::new())),
+            security_manager,
         };
 
         let mut app = test::init_service(
@@ -645,11 +1046,14 @@ mod tests {
                 "id": "broker1",
                 "partitions": 3,
                 "replication": 2,
-                "storage": "/tmp/broker1"
+                "storage": storage_path
             }))
             .to_request();
 
         let _ = test::call_service(&mut app, req).await;
+
+        // Give the broker time to initialize fully
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
         // Now stop the broker
         let req = test::TestRequest::post()
@@ -661,6 +1065,9 @@ mod tests {
 
         let resp = test::call_service(&mut app, req).await;
         assert!(resp.status().is_success());
+
+        // Clean up test resources
+        let _ = std::fs::remove_dir_all(storage_path);
     }
 
     /// Test for sending a message to a broker.
@@ -680,8 +1087,18 @@ mod tests {
     /// 7. Assert that the response status is successful, indicating that the message was sent.
     #[actix_rt::test]
     async fn test_send_message() {
+        // Use a unique temp directory for each test run to avoid conflicts
+        let test_id = uuid::Uuid::new_v4().to_string();
+        let storage_path = format!("./target/test_storage_{}", test_id);
+
+        let security_manager = Arc::new(
+            SecurityManager::new(SecurityConfig::default())
+                .await
+                .expect("Failed to initialize security manager"),
+        );
         let state = AppState {
             brokers: Arc::new(Mutex::new(HashMap::new())),
+            security_manager,
         };
 
         let mut app = test::init_service(
@@ -699,11 +1116,15 @@ mod tests {
                 "id": "broker1",
                 "partitions": 3,
                 "replication": 2,
-                "storage": "/tmp/broker1"
+                "storage": storage_path
             }))
             .to_request();
 
-        let _ = test::call_service(&mut app, req).await;
+        let resp = test::call_service(&mut app, req).await;
+        assert!(resp.status().is_success());
+
+        // Give the broker time to initialize fully
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
         // Now send a message
         let req = test::TestRequest::post()
@@ -716,6 +1137,9 @@ mod tests {
 
         let resp = test::call_service(&mut app, req).await;
         assert!(resp.status().is_success());
+
+        // Clean up test resources
+        let _ = std::fs::remove_dir_all(storage_path);
     }
 
     /// Test for consuming messages from a broker.
@@ -740,8 +1164,18 @@ mod tests {
     ///    indicating that the message was consumed.
     #[actix_rt::test]
     async fn test_consume_messages() {
+        // Use a unique temp directory for each test run to avoid conflicts
+        let test_id = uuid::Uuid::new_v4().to_string();
+        let storage_path = format!("./target/test_storage_{}", test_id);
+
+        let security_manager = Arc::new(
+            SecurityManager::new(SecurityConfig::default())
+                .await
+                .expect("Failed to initialize security manager"),
+        );
         let state = AppState {
             brokers: Arc::new(Mutex::new(HashMap::new())),
+            security_manager,
         };
 
         let mut app = test::init_service(
@@ -760,11 +1194,15 @@ mod tests {
                 "id": "broker1",
                 "partitions": 3,
                 "replication": 2,
-                "storage": "/tmp/broker1"
+                "storage": storage_path
             }))
             .to_request();
 
-        let _ = test::call_service(&mut app, req).await;
+        let resp = test::call_service(&mut app, req).await;
+        assert!(resp.status().is_success());
+
+        // Give the broker time to initialize fully
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
         // Send a message
         let req = test::TestRequest::post()
@@ -775,7 +1213,11 @@ mod tests {
             }))
             .to_request();
 
-        let _ = test::call_service(&mut app, req).await;
+        let resp = test::call_service(&mut app, req).await;
+        assert!(resp.status().is_success());
+
+        // Give the system time to process the message
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
         // Now consume the message
         let req = test::TestRequest::post()
@@ -787,6 +1229,9 @@ mod tests {
 
         let resp = test::call_service(&mut app, req).await;
         assert!(resp.status().is_success());
+
+        // Clean up test resources
+        let _ = std::fs::remove_dir_all(storage_path);
     }
 
     /// Test for checking the status of a broker.
@@ -806,8 +1251,18 @@ mod tests {
     /// 7. Assert that the response status is successful, indicating that the broker is healthy.
     #[actix_rt::test]
     async fn test_broker_status() {
+        // Use a unique temp directory for each test run to avoid conflicts
+        let test_id = uuid::Uuid::new_v4().to_string();
+        let storage_path = format!("./target/test_storage_{}", test_id);
+
+        let security_manager = Arc::new(
+            SecurityManager::new(SecurityConfig::default())
+                .await
+                .expect("Failed to initialize security manager"),
+        );
         let state = AppState {
             brokers: Arc::new(Mutex::new(HashMap::new())),
+            security_manager,
         };
 
         let mut app = test::init_service(
@@ -825,11 +1280,15 @@ mod tests {
                 "id": "broker1",
                 "partitions": 3,
                 "replication": 2,
-                "storage": "/tmp/broker1"
+                "storage": storage_path
             }))
             .to_request();
 
-        let _ = test::call_service(&mut app, req).await;
+        let resp = test::call_service(&mut app, req).await;
+        assert!(resp.status().is_success());
+
+        // Give the broker time to initialize fully
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
         // Now check the broker status
         let req = test::TestRequest::post()
@@ -841,6 +1300,9 @@ mod tests {
 
         let resp = test::call_service(&mut app, req).await;
         assert!(resp.status().is_success());
+
+        // Clean up test resources
+        let _ = std::fs::remove_dir_all(storage_path);
     }
 
     /// Test for starting a broker that is already running.
@@ -860,8 +1322,18 @@ mod tests {
     ///    indicating that the broker is already running.
     #[actix_rt::test]
     async fn test_start_broker_already_running() {
+        // Use a unique temp directory for each test run to avoid conflicts
+        let test_id = uuid::Uuid::new_v4().to_string();
+        let storage_path = format!("./target/test_storage_{}", test_id);
+
+        let security_manager = Arc::new(
+            SecurityManager::new(SecurityConfig::default())
+                .await
+                .expect("Failed to initialize security manager"),
+        );
         let state = AppState {
             brokers: Arc::new(Mutex::new(HashMap::new())),
+            security_manager,
         };
 
         let mut app = test::init_service(
@@ -878,11 +1350,15 @@ mod tests {
                 "id": "broker1",
                 "partitions": 3,
                 "replication": 2,
-                "storage": "/tmp/broker1"
+                "storage": storage_path.clone()
             }))
             .to_request();
 
-        let _ = test::call_service(&mut app, req).await;
+        let resp = test::call_service(&mut app, req).await;
+        assert!(resp.status().is_success());
+
+        // Give the broker time to initialize fully
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
         // Try to start the same broker again
         let req = test::TestRequest::post()
@@ -891,7 +1367,7 @@ mod tests {
                 "id": "broker1",
                 "partitions": 3,
                 "replication": 2,
-                "storage": "/tmp/broker1"
+                "storage": storage_path.clone()
             }))
             .to_request();
 
@@ -914,8 +1390,14 @@ mod tests {
     ///    indicating that the broker is not running.
     #[actix_rt::test]
     async fn test_stop_broker_not_running() {
+        let security_manager = Arc::new(
+            SecurityManager::new(SecurityConfig::default())
+                .await
+                .expect("Failed to initialize security manager"),
+        );
         let state = AppState {
             brokers: Arc::new(Mutex::new(HashMap::new())),
+            security_manager,
         };
 
         let mut app = test::init_service(
@@ -925,7 +1407,7 @@ mod tests {
         )
         .await;
 
-        // Try to stop a broker that is not running
+        // Try to stop a broker that is not running.
         let req = test::TestRequest::post()
             .uri("/stop")
             .set_json(json!({
@@ -952,8 +1434,14 @@ mod tests {
     ///    indicating that the broker is not running.
     #[actix_rt::test]
     async fn test_send_message_no_broker() {
+        let security_manager = Arc::new(
+            SecurityManager::new(SecurityConfig::default())
+                .await
+                .expect("Failed to initialize security manager"),
+        );
         let state = AppState {
             brokers: Arc::new(Mutex::new(HashMap::new())),
+            security_manager,
         };
 
         let mut app = test::init_service(
@@ -991,8 +1479,14 @@ mod tests {
     ///    indicating that the broker is not running.
     #[actix_rt::test]
     async fn test_consume_messages_no_broker() {
+        let security_manager = Arc::new(
+            SecurityManager::new(SecurityConfig::default())
+                .await
+                .expect("Failed to initialize security manager"),
+        );
         let state = AppState {
             brokers: Arc::new(Mutex::new(HashMap::new())),
+            security_manager,
         };
 
         let mut app = test::init_service(
@@ -1029,8 +1523,14 @@ mod tests {
     ///    indicating that the broker is not running.
     #[actix_rt::test]
     async fn test_broker_status_no_broker() {
+        let security_manager = Arc::new(
+            SecurityManager::new(SecurityConfig::default())
+                .await
+                .expect("Failed to initialize security manager"),
+        );
         let state = AppState {
             brokers: Arc::new(Mutex::new(HashMap::new())),
+            security_manager,
         };
 
         let mut app = test::init_service(
@@ -1068,11 +1568,24 @@ mod tests {
     ///    indicating that the broker has been started and the server is running.
     #[actix_rt::test]
     async fn test_run_server() {
-        let srv = actix_test::start(|| {
+        // Use a unique temp directory for each test run to avoid conflicts
+        let test_id = uuid::Uuid::new_v4().to_string();
+        let storage_path = format!("./target/test_storage_{}", test_id);
+
+        let security_manager = Arc::new(
+            SecurityManager::new(SecurityConfig::default())
+                .await
+                .expect("Failed to initialize security manager"),
+        );
+
+        let app_state = AppState {
+            brokers: Arc::new(Mutex::new(HashMap::new())),
+            security_manager,
+        };
+
+        let srv = actix_test::start(move || {
             App::new()
-                .app_data(web::Data::new(AppState {
-                    brokers: Arc::new(Mutex::new(HashMap::new())),
-                }))
+                .app_data(web::Data::new(app_state.clone()))
                 .route("/start", web::post().to(start_broker))
                 .route("/stop", web::post().to(stop_broker))
                 .route("/send", web::post().to(send_message))
@@ -1086,11 +1599,14 @@ mod tests {
                 "id": "broker1",
                 "partitions": 3,
                 "replication": 2,
-                "storage": "/tmp/broker1"
+                "storage": storage_path
             }))
             .await
             .unwrap();
 
         assert!(req.status().is_success());
+
+        // Clean up test resources
+        let _ = std::fs::remove_dir_all(storage_path);
     }
 }

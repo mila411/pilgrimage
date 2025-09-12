@@ -26,8 +26,20 @@
 //! assert!(!authenticator.authenticate("user3", "password").unwrap());
 //! ```
 
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::error::Error;
+
+/// User information structure
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UserInfo {
+    pub user_id: String,
+    pub username: String,
+    pub email: Option<String>,
+    pub display_name: Option<String>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub last_login: Option<chrono::DateTime<chrono::Utc>>,
+}
 
 /// A trait for authenticating users based on username and password.
 pub trait Authenticator {
@@ -94,5 +106,349 @@ impl Authenticator for BasicAuthenticator {
             .credentials
             .get(username)
             .is_some_and(|stored_password| stored_password == password))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Utc;
+
+    #[test]
+    fn test_basic_authenticator_creation() {
+        let authenticator = BasicAuthenticator::new();
+        assert!(authenticator.credentials.is_empty());
+    }
+
+    #[test]
+    fn test_basic_authenticator_default() {
+        let authenticator = BasicAuthenticator::default();
+        assert!(authenticator.credentials.is_empty());
+    }
+
+    #[test]
+    fn test_add_user() {
+        let mut authenticator = BasicAuthenticator::new();
+
+        authenticator.add_user("test_user", "test_password");
+        authenticator.add_user("admin", "admin_pass");
+
+        assert_eq!(authenticator.credentials.len(), 2);
+        assert_eq!(
+            authenticator.credentials.get("test_user"),
+            Some(&"test_password".to_string())
+        );
+        assert_eq!(
+            authenticator.credentials.get("admin"),
+            Some(&"admin_pass".to_string())
+        );
+    }
+
+    #[test]
+    fn test_add_user_overwrite() {
+        let mut authenticator = BasicAuthenticator::new();
+
+        authenticator.add_user("user", "old_password");
+        authenticator.add_user("user", "new_password");
+
+        assert_eq!(authenticator.credentials.len(), 1);
+        assert_eq!(
+            authenticator.credentials.get("user"),
+            Some(&"new_password".to_string())
+        );
+    }
+
+    #[test]
+    fn test_successful_authentication() {
+        let mut authenticator = BasicAuthenticator::new();
+        authenticator.add_user("valid_user", "correct_password");
+
+        let result = authenticator.authenticate("valid_user", "correct_password");
+        assert!(result.is_ok());
+        assert!(result.unwrap());
+    }
+
+    #[test]
+    fn test_failed_authentication_wrong_password() {
+        let mut authenticator = BasicAuthenticator::new();
+        authenticator.add_user("user", "correct_password");
+
+        let result = authenticator.authenticate("user", "wrong_password");
+        assert!(result.is_ok());
+        assert!(!result.unwrap());
+    }
+
+    #[test]
+    fn test_failed_authentication_nonexistent_user() {
+        let authenticator = BasicAuthenticator::new();
+
+        let result = authenticator.authenticate("nonexistent", "any_password");
+        assert!(result.is_ok());
+        assert!(!result.unwrap());
+    }
+
+    #[test]
+    fn test_empty_credentials_authentication() {
+        let authenticator = BasicAuthenticator::new();
+
+        let result = authenticator.authenticate("", "");
+        assert!(result.is_ok());
+        assert!(!result.unwrap());
+    }
+
+    #[test]
+    fn test_case_sensitive_username() {
+        let mut authenticator = BasicAuthenticator::new();
+        authenticator.add_user("User", "password");
+
+        // Should fail with different case
+        let result1 = authenticator.authenticate("user", "password");
+        assert!(result1.is_ok());
+        assert!(!result1.unwrap());
+
+        // Should succeed with exact case
+        let result2 = authenticator.authenticate("User", "password");
+        assert!(result2.is_ok());
+        assert!(result2.unwrap());
+    }
+
+    #[test]
+    fn test_case_sensitive_password() {
+        let mut authenticator = BasicAuthenticator::new();
+        authenticator.add_user("user", "Password");
+
+        // Should fail with different case
+        let result1 = authenticator.authenticate("user", "password");
+        assert!(result1.is_ok());
+        assert!(!result1.unwrap());
+
+        // Should succeed with exact case
+        let result2 = authenticator.authenticate("user", "Password");
+        assert!(result2.is_ok());
+        assert!(result2.unwrap());
+    }
+
+    #[test]
+    fn test_special_characters_in_credentials() {
+        let mut authenticator = BasicAuthenticator::new();
+        authenticator.add_user("user@domain.com", "p@ssw0rd!#$%");
+
+        let result = authenticator.authenticate("user@domain.com", "p@ssw0rd!#$%");
+        assert!(result.is_ok());
+        assert!(result.unwrap());
+    }
+
+    #[test]
+    fn test_unicode_credentials() {
+        let mut authenticator = BasicAuthenticator::new();
+        authenticator.add_user("user", "password");
+
+        let result = authenticator.authenticate("user", "password");
+        assert!(result.is_ok());
+        assert!(result.unwrap());
+    }
+
+    #[test]
+    fn test_long_credentials() {
+        let mut authenticator = BasicAuthenticator::new();
+        let long_username = "a".repeat(1000);
+        let long_password = "b".repeat(1000);
+
+        authenticator.add_user(&long_username, &long_password);
+
+        let result = authenticator.authenticate(&long_username, &long_password);
+        assert!(result.is_ok());
+        assert!(result.unwrap());
+    }
+
+    #[test]
+    fn test_empty_username_with_password() {
+        let mut authenticator = BasicAuthenticator::new();
+        authenticator.add_user("", "password");
+
+        let result = authenticator.authenticate("", "password");
+        assert!(result.is_ok());
+        assert!(result.unwrap());
+    }
+
+    #[test]
+    fn test_username_with_empty_password() {
+        let mut authenticator = BasicAuthenticator::new();
+        authenticator.add_user("user", "");
+
+        let result = authenticator.authenticate("user", "");
+        assert!(result.is_ok());
+        assert!(result.unwrap());
+    }
+
+    #[test]
+    fn test_multiple_users_authentication() {
+        let mut authenticator = BasicAuthenticator::new();
+        authenticator.add_user("user1", "pass1");
+        authenticator.add_user("user2", "pass2");
+        authenticator.add_user("user3", "pass3");
+
+        // Test all users can authenticate
+        assert!(authenticator.authenticate("user1", "pass1").unwrap());
+        assert!(authenticator.authenticate("user2", "pass2").unwrap());
+        assert!(authenticator.authenticate("user3", "pass3").unwrap());
+
+        // Test cross-authentication fails
+        assert!(!authenticator.authenticate("user1", "pass2").unwrap());
+        assert!(!authenticator.authenticate("user2", "pass3").unwrap());
+        assert!(!authenticator.authenticate("user3", "pass1").unwrap());
+    }
+
+    #[test]
+    fn test_userinfo_creation() {
+        let now = Utc::now();
+        let user_info = UserInfo {
+            user_id: "user_123".to_string(),
+            username: "testuser".to_string(),
+            email: Some("test@example.com".to_string()),
+            display_name: Some("Test User".to_string()),
+            created_at: now,
+            last_login: None,
+        };
+
+        assert_eq!(user_info.user_id, "user_123");
+        assert_eq!(user_info.username, "testuser");
+        assert_eq!(user_info.email, Some("test@example.com".to_string()));
+        assert_eq!(user_info.display_name, Some("Test User".to_string()));
+        assert_eq!(user_info.created_at, now);
+        assert!(user_info.last_login.is_none());
+    }
+
+    #[test]
+    fn test_userinfo_serialization() {
+        let now = Utc::now();
+        let user_info = UserInfo {
+            user_id: "user_456".to_string(),
+            username: "serialtest".to_string(),
+            email: Some("serial@test.com".to_string()),
+            display_name: Some("Serial Test".to_string()),
+            created_at: now,
+            last_login: Some(now),
+        };
+
+        // Test JSON serialization
+        let json_result = serde_json::to_string(&user_info);
+        assert!(json_result.is_ok());
+
+        let json_str = json_result.unwrap();
+        assert!(json_str.contains("user_456"));
+        assert!(json_str.contains("serialtest"));
+        assert!(json_str.contains("serial@test.com"));
+
+        // Test JSON deserialization
+        let deserialized_result: Result<UserInfo, _> = serde_json::from_str(&json_str);
+        assert!(deserialized_result.is_ok());
+
+        let deserialized = deserialized_result.unwrap();
+        assert_eq!(deserialized.user_id, user_info.user_id);
+        assert_eq!(deserialized.username, user_info.username);
+        assert_eq!(deserialized.email, user_info.email);
+        assert_eq!(deserialized.display_name, user_info.display_name);
+    }
+
+    #[test]
+    fn test_userinfo_optional_fields() {
+        let now = Utc::now();
+
+        // Test with minimal fields
+        let minimal_user = UserInfo {
+            user_id: "min_user".to_string(),
+            username: "minimal".to_string(),
+            email: None,
+            display_name: None,
+            created_at: now,
+            last_login: None,
+        };
+
+        assert!(minimal_user.email.is_none());
+        assert!(minimal_user.display_name.is_none());
+        assert!(minimal_user.last_login.is_none());
+
+        // Test serialization of minimal user
+        let json_result = serde_json::to_string(&minimal_user);
+        assert!(json_result.is_ok());
+    }
+
+    #[test]
+    fn test_userinfo_clone() {
+        let now = Utc::now();
+        let original = UserInfo {
+            user_id: "clone_test".to_string(),
+            username: "cloneuser".to_string(),
+            email: Some("clone@test.com".to_string()),
+            display_name: Some("Clone User".to_string()),
+            created_at: now,
+            last_login: Some(now),
+        };
+
+        let cloned = original.clone();
+
+        assert_eq!(original.user_id, cloned.user_id);
+        assert_eq!(original.username, cloned.username);
+        assert_eq!(original.email, cloned.email);
+        assert_eq!(original.display_name, cloned.display_name);
+        assert_eq!(original.created_at, cloned.created_at);
+        assert_eq!(original.last_login, cloned.last_login);
+    }
+
+    #[test]
+    fn test_userinfo_debug_format() {
+        let now = Utc::now();
+        let user_info = UserInfo {
+            user_id: "debug_user".to_string(),
+            username: "debugtest".to_string(),
+            email: Some("debug@test.com".to_string()),
+            display_name: Some("Debug User".to_string()),
+            created_at: now,
+            last_login: None,
+        };
+
+        let debug_str = format!("{:?}", user_info);
+        assert!(debug_str.contains("UserInfo"));
+        assert!(debug_str.contains("debug_user"));
+        assert!(debug_str.contains("debugtest"));
+        assert!(debug_str.contains("debug@test.com"));
+    }
+
+    #[test]
+    fn test_authenticator_trait_implementation() {
+        let mut authenticator = BasicAuthenticator::new();
+        authenticator.add_user("trait_test", "trait_pass");
+
+        // Test that BasicAuthenticator implements Authenticator trait
+        let auth_trait: &dyn Authenticator = &authenticator;
+
+        let result = auth_trait.authenticate("trait_test", "trait_pass");
+        assert!(result.is_ok());
+        assert!(result.unwrap());
+
+        let failed_result = auth_trait.authenticate("trait_test", "wrong_pass");
+        assert!(failed_result.is_ok());
+        assert!(!failed_result.unwrap());
+    }
+
+    #[test]
+    fn test_whitespace_handling() {
+        let mut authenticator = BasicAuthenticator::new();
+        authenticator.add_user("user", "password");
+
+        // Whitespace should not be trimmed - exact match required
+        assert!(!authenticator.authenticate(" user", "password").unwrap());
+        assert!(!authenticator.authenticate("user ", "password").unwrap());
+        assert!(!authenticator.authenticate("user", " password").unwrap());
+        assert!(!authenticator.authenticate("user", "password ").unwrap());
+
+        // Test with whitespace in actual credentials
+        authenticator.add_user(" spaced user ", " spaced pass ");
+        assert!(
+            authenticator
+                .authenticate(" spaced user ", " spaced pass ")
+                .unwrap()
+        );
     }
 }

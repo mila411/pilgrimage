@@ -111,7 +111,7 @@ impl SchemaRegistry {
         let topic_schemas = schemas.entry(topic.to_string()).or_default();
 
         let new_schema = Schema {
-            id: topic_schemas.len() as u32,
+            id: topic_schemas.len() as u32 + 1, // Start IDs from 1 instead of 0
             version: SchemaVersion::new(topic_schemas.len() as u32 + 1),
             definition: definition.to_string(),
         };
@@ -254,7 +254,7 @@ mod tests {
         assert!(result.is_ok());
 
         let schema = result.unwrap();
-        assert_eq!(schema.id, 0);
+        assert_eq!(schema.id, 1); // Updated to expect ID starting from 1
         assert_eq!(schema.version.major, 1);
     }
 
