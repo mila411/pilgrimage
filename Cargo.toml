@@ -13,7 +13,6 @@ categories = ["rust-patterns"]
 [lib]
 path = "src/lib.rs"
 crate-type = ["rlib"]
-doctest = false
 
 [[bin]]
 name = "pilgrimage"
