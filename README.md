@@ -579,6 +579,7 @@ cargo run --example 05_monitoring_metrics   # Metrics collection
 cargo run --example 06_web_console         # Web interface
 cargo run --example 07_advanced_integration # Advanced features
 cargo run --example 08_comprehensive_test   # Full system test
+cargo run --example 09_tls_demo_comprehensive_test   # TLS/mTLS test
 ```
 
 --------------------
