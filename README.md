@@ -18,7 +18,7 @@
     <a href="https://app.deepsource.com/gh/mila411/pilgrimage/" target="_blank">
       <img alt="DeepSource" title="DeepSource" src="https://app.deepsource.com/gh/mila411/pilgrimage.svg/?label=active+issues&show_trend=true&token=tsauTwVl8Nd7UH7xuQCtLR9H"/>
     </a>
-    <img alt="Version" src="https://img.shields.io/badge/Version-0.16.0-brightgreen">
+    <img alt="Version" src="https://img.shields.io/badge/Version-0.16.1-brightgreen">
     <img alt="License" src="https://img.shields.io/badge/License-MIT-blue.svg">
     <img alt="PRs Welcome" src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg">
 </p>
@@ -93,7 +93,7 @@ To use Pilgrimage, add the following to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-pilgrimage = "0.16.0"
+pilgrimage = "0.16.1"
 ```
 
 ### 📦 From Source
@@ -199,7 +199,7 @@ cargo run --example 09_tls_demo          # TLS/mTLS configuration demo
 
 ## 🏭 Production Readiness
 
-**Pilgrimage v0.16.0 Production Status: 75% Ready**
+**Pilgrimage v0.16.1 Production Status: 75% Ready**
 
 ### ✅ Production-Ready Features
 
