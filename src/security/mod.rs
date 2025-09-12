@@ -3,7 +3,8 @@
 //! Comprehensive security implementation with TLS/SSL encryption,
 //! fine-grained authorization, and comprehensive audit logging
 
-pub mod audit_logger;
+// mod audit_logger;
+mod audit_logger;
 pub mod authorization;
 pub mod modern_tls;
 pub mod tls_manager;
@@ -29,7 +30,6 @@ pub use tls_manager::{
     CertRotationConfig, CertValidationConfig, EnhancedTlsConfig, EnhancedTlsManager,
     TlsConnectionInfo, TlsVersion,
 };
-// pub use tls_manager_simple::{EnhancedTlsManager as SimpleTlsManager, TlsConfig};
 
 use crate::network::error::NetworkResult;
 
