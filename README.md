@@ -1014,6 +1014,14 @@ pilgrimage --version           # Show version information
 
 ## 🌐 Web Console API
 
+<p align="center">
+  <img src=".github/images/login.png" alt="logo" width=85%>
+</p>
+
+<p align="center">
+  <img src=".github/images/console.png" alt="logo" width=85%>
+</p>
+
 Pilgrimage provides a comprehensive REST API and web dashboard for browser-based management:
 
 ### 🌐 Web Dashboard
