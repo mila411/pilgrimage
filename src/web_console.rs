@@ -7,6 +7,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use crate::auth::{DistributedAuthenticator, web_middleware::JwtAuth};
 use crate::broker::Broker;
 use crate::broker::node::Node;
 use crate::message::metadata::MessageMetadata;
@@ -141,6 +142,8 @@ pub struct AppState {
     brokers: Arc<Mutex<HashMap<String, BrokerWrapper>>>,
     /// Security manager for handling authentication, authorization, and audit logging
     security_manager: Arc<SecurityManager>,
+    /// JWT authenticator for token validation and generation
+    jwt_authenticator: Arc<DistributedAuthenticator>,
 }
 
 /// Deserializable structure for starting a new broker.
@@ -507,12 +510,13 @@ async fn metrics() -> impl Responder {
 
 /// Dashboard HTML display
 async fn dashboard_html() -> impl Responder {
-    match std::fs::read_to_string("templates/dashboard.html") {
-        Ok(html) => HttpResponse::Ok()
-            .content_type("text/html; charset=utf-8")
-            .body(html),
-        Err(_) => HttpResponse::InternalServerError().body("Failed to load dashboard template"),
-    }
+    // Try to load from template file first, fall back to built-in template
+    let html = std::fs::read_to_string("templates/dashboard.html")
+        .unwrap_or_else(|_| default_dashboard_html());
+
+    HttpResponse::Ok()
+        .content_type("text/html; charset=utf-8")
+        .body(html)
 }
 
 /// Serves the comprehensive web console HTML page
@@ -604,6 +608,10 @@ fn default_console_html() -> String {
     <div class="container">
       <h1>Pilgrimage Web Console</h1>
 
+      <div style="text-align: right; margin-bottom: 10px;">
+        <span id="auth-status">✗ Not Authenticated</span>
+      </div>
+
       <div class="tabs">
         <div class="tab active" onclick="showTab('broker-management')">Broker Management</div>
         <div class="tab" onclick="showTab('messaging')">Messaging</div>
@@ -662,6 +670,7 @@ fn default_console_html() -> String {
           <input type="text" id="username" placeholder="Username" value="admin">
           <input type="password" id="password" placeholder="Password" value="password">
           <button onclick="securityLogin()">Login</button>
+          <button onclick="securityLogout()">Logout</button>
           <div id="login-result" class="result"></div>
         </div>
 
@@ -710,6 +719,31 @@ fn default_console_html() -> String {
         event.target.classList.add('active');
       }
 
+      // JWT Token management
+      function getStoredToken() {
+        return localStorage.getItem('pilgrimage_jwt_token');
+      }
+
+      function setStoredToken(token) {
+        localStorage.setItem('pilgrimage_jwt_token', token);
+      }
+
+      function removeStoredToken() {
+        localStorage.removeItem('pilgrimage_jwt_token');
+      }
+
+      function checkAuthStatus() {
+        const token = getStoredToken();
+        const statusIndicator = document.getElementById('auth-status');
+        if (token) {
+          statusIndicator.innerHTML = '<span style="color: green;">✓ Authenticated</span>';
+          return true;
+        } else {
+          statusIndicator.innerHTML = '<span style="color: red;">✗ Not Authenticated</span>';
+          return false;
+        }
+      }
+
       async function makeRequest(url, method = "GET", body = null) {
         try {
           const options = {
@@ -718,12 +752,30 @@ fn default_console_html() -> String {
               "Content-Type": "application/json",
             },
           };
+
+          // Add JWT token to Authorization header for protected endpoints
+          const token = getStoredToken();
+          const publicEndpoints = ['/security/login', '/metrics', '/console', '/test', '/health', '/api/cluster-health', '/dashboard'];
+          const isPublicEndpoint = publicEndpoints.some(endpoint => url.startsWith(endpoint));
+
+          if (token && !isPublicEndpoint) {
+            options.headers.Authorization = `Bearer ${token}`;
+          }
+
           if (body) {
             options.body = JSON.stringify(body);
           }
 
           const response = await fetch(url, options);
           const text = await response.text();
+
+          // Handle authentication errors
+          if (response.status === 401) {
+            removeStoredToken();
+            checkAuthStatus();
+            return { status: response.status, body: "Authentication required. Please login." };
+          }
+
           return { status: response.status, body: text };
         } catch (error) {
           return { status: "Error", body: error.message };
@@ -776,7 +828,29 @@ fn default_console_html() -> String {
           username: document.getElementById("username").value,
           password: document.getElementById("password").value,
         });
-        document.getElementById("login-result").innerHTML = `Status: ${result.status}<br>Response: ${result.body}`;
+
+        if (result.status === 200) {
+          try {
+            const response = JSON.parse(result.body);
+            if (response.token) {
+              setStoredToken(response.token);
+              checkAuthStatus();
+              document.getElementById("login-result").innerHTML = `<span style="color: green;">Login successful! Role: ${response.role}</span>`;
+            } else {
+              document.getElementById("login-result").innerHTML = `<span style="color: red;">Login failed: No token received</span>`;
+            }
+          } catch (e) {
+            document.getElementById("login-result").innerHTML = `<span style="color: red;">Login failed: Invalid response</span>`;
+          }
+        } else {
+          document.getElementById("login-result").innerHTML = `<span style="color: red;">Login failed: ${result.body}</span>`;
+        }
+      }
+
+      async function securityLogout() {
+        removeStoredToken();
+        checkAuthStatus();
+        document.getElementById("login-result").innerHTML = `<span style="color: blue;">Logged out successfully</span>`;
       }
 
       async function getSecurityStatus() {
@@ -797,6 +871,520 @@ fn default_console_html() -> String {
       async function getClusterHealth() {
         const result = await makeRequest("/api/cluster-health");
         document.getElementById("cluster-result").innerHTML = `Status: ${result.status}<br>Response: ${result.body}`;
+      }
+
+      // Initialize authentication status on page load
+      document.addEventListener('DOMContentLoaded', function() {
+        checkAuthStatus();
+      });
+    </script>
+  </body>
+</html>
+"#.to_string()
+}
+
+/// Default dashboard HTML template with integrated login functionality
+fn default_dashboard_html() -> String {
+    r#"
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Pilgrimage Dashboard</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 0;
+        padding: 0;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        min-height: 100vh;
+      }
+      .login-screen {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 100vh;
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        z-index: 1000;
+      }
+      .login-box {
+        background: white;
+        padding: 40px;
+        border-radius: 10px;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+        width: 100%;
+        max-width: 400px;
+        text-align: center;
+      }
+      .login-box h1 {
+        color: #333;
+        margin-bottom: 30px;
+        font-size: 28px;
+      }
+      .login-form {
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+      }
+      .login-input {
+        padding: 12px 16px;
+        border: 1px solid #ddd;
+        border-radius: 6px;
+        font-size: 16px;
+        transition: border-color 0.3s;
+      }
+      .login-input:focus {
+        outline: none;
+        border-color: #667eea;
+        box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+      }
+      .login-button {
+        padding: 12px 24px;
+        background: #667eea;
+        color: white;
+        border: none;
+        border-radius: 6px;
+        font-size: 16px;
+        cursor: pointer;
+        transition: background 0.3s;
+      }
+      .login-button:hover {
+        background: #5a6fd8;
+      }
+      .login-error {
+        color: #dc3545;
+        background: #f8d7da;
+        border: 1px solid #f5c6cb;
+        padding: 10px;
+        border-radius: 4px;
+        margin-top: 15px;
+      }
+      .main-dashboard {
+        display: none;
+        min-height: 100vh;
+        padding: 20px;
+        color: white;
+      }
+      .header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        background: rgba(255, 255, 255, 0.1);
+        padding: 20px;
+        border-radius: 10px;
+        margin-bottom: 30px;
+        backdrop-filter: blur(10px);
+      }
+      .user-info {
+        color: white;
+        font-size: 14px;
+      }
+      .logout-button {
+        background: rgba(255, 255, 255, 0.2);
+        color: white;
+        border: none;
+        padding: 8px 16px;
+        border-radius: 6px;
+        cursor: pointer;
+        transition: background 0.3s;
+      }
+      .logout-button:hover {
+        background: rgba(255, 255, 255, 0.3);
+      }
+      .dashboard-container {
+        max-width: 1400px;
+        margin: 0 auto;
+      }
+      .dashboard-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        gap: 20px;
+        margin-bottom: 30px;
+      }
+      .dashboard-card {
+        background: rgba(255, 255, 255, 0.1);
+        backdrop-filter: blur(10px);
+        padding: 20px;
+        border-radius: 10px;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+      }
+      .dashboard-card h3 {
+        margin-top: 0;
+        color: white;
+        font-size: 18px;
+      }
+      .metric-value {
+        font-size: 32px;
+        font-weight: bold;
+        color: #fff;
+        margin: 10px 0;
+      }
+      .metric-label {
+        font-size: 14px;
+        opacity: 0.8;
+        color: #fff;
+      }
+      .status-indicator {
+        display: inline-block;
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        margin-right: 8px;
+      }
+      .status-healthy { background-color: #28a745; }
+      .status-warning { background-color: #ffc107; }
+      .status-error { background-color: #dc3545; }
+      .refresh-button {
+        background: rgba(255, 255, 255, 0.2);
+        color: white;
+        border: none;
+        padding: 10px 20px;
+        border-radius: 6px;
+        cursor: pointer;
+        margin: 10px 0;
+        transition: background 0.3s;
+      }
+      .refresh-button:hover {
+        background: rgba(255, 255, 255, 0.3);
+      }
+      .chart-container {
+        background: rgba(255, 255, 255, 0.9);
+        padding: 20px;
+        border-radius: 10px;
+        color: #333;
+        margin-top: 20px;
+      }
+      .loading {
+        text-align: center;
+        opacity: 0.7;
+        padding: 20px;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- ログイン画面 -->
+    <div id="login-screen" class="login-screen">
+      <div class="login-box">
+        <h1>🚀 Pilgrimage Dashboard</h1>
+        <form class="login-form" onsubmit="handleLogin(event)">
+          <input
+            type="text"
+            id="login-username"
+            class="login-input"
+            placeholder="Username"
+            required
+          />
+          <input
+            type="password"
+            id="login-password"
+            class="login-input"
+            placeholder="Password"
+            required
+          />
+          <button type="submit" class="login-button">🔐 Login</button>
+        </form>
+        <div id="login-error" class="login-error" style="display: none"></div>
+      </div>
+    </div>
+
+    <!-- メインダッシュボード -->
+    <div id="main-dashboard" class="main-dashboard">
+      <div class="header">
+        <div class="user-info">
+          <span id="user-display">👤 Welcome, <span id="username-display"></span> (<span id="role-display"></span>)</span>
+        </div>
+        <h1>📊 Pilgrimage Dashboard</h1>
+        <button class="logout-button" onclick="handleLogout()">🚪 Logout</button>
+      </div>
+
+      <div class="dashboard-container">
+        <div class="dashboard-grid">
+          <div class="dashboard-card">
+            <h3>🏥 Cluster Health</h3>
+            <div class="metric-value" id="cluster-status">
+              <span class="status-indicator status-healthy"></span>Loading...
+            </div>
+            <div class="metric-label">Active Brokers: <span id="active-brokers">-</span></div>
+            <div class="metric-label">Total Topics: <span id="total-topics">-</span></div>
+            <button class="refresh-button" onclick="refreshClusterHealth()">🔄 Refresh</button>
+          </div>
+
+          <div class="dashboard-card">
+            <h3>📈 Throughput</h3>
+            <div class="metric-value" id="messages-per-sec">-</div>
+            <div class="metric-label">Messages/sec</div>
+            <div class="metric-label">In: <span id="bytes-in">-</span> | Out: <span id="bytes-out">-</span></div>
+            <button class="refresh-button" onclick="refreshThroughput()">🔄 Refresh</button>
+          </div>
+
+          <div class="dashboard-card">
+            <h3>⚡ Performance</h3>
+            <div class="metric-value" id="avg-latency">-</div>
+            <div class="metric-label">Avg Latency (ms)</div>
+            <div class="metric-label">P99: <span id="p99-latency">-</span> ms</div>
+            <button class="refresh-button" onclick="refreshPerformance()">🔄 Refresh</button>
+          </div>
+
+          <div class="dashboard-card">
+            <h3>💾 Storage</h3>
+            <div class="metric-value" id="total-messages">-</div>
+            <div class="metric-label">Total Messages</div>
+            <div class="metric-label">Log Size: <span id="log-size">-</span></div>
+            <button class="refresh-button" onclick="refreshStorage()">🔄 Refresh</button>
+          </div>
+        </div>
+
+        <div class="chart-container">
+          <h3>📊 Real-time Metrics</h3>
+          <div id="metrics-content" class="loading">Loading dashboard data...</div>
+          <button class="refresh-button" onclick="refreshDashboard()">🔄 Refresh All</button>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      // ===== Authentication Management =====
+      let authToken = null;
+      let currentUser = null;
+      let userRole = null;
+
+      // Check session on page load
+      document.addEventListener("DOMContentLoaded", function () {
+        checkSession();
+        // Auto-refresh dashboard every 30 seconds when authenticated
+        setInterval(() => {
+          if (authToken) {
+            refreshDashboard();
+          }
+        }, 30000);
+      });
+
+      function checkSession() {
+        authToken = localStorage.getItem("authToken");
+        currentUser = localStorage.getItem("currentUser");
+        userRole = localStorage.getItem("userRole");
+
+        if (authToken && currentUser && userRole) {
+          showMainDashboard();
+          refreshDashboard();
+        } else {
+          showLoginScreen();
+        }
+      }
+
+      function showLoginScreen() {
+        document.getElementById("login-screen").style.display = "flex";
+        document.getElementById("main-dashboard").style.display = "none";
+      }
+
+      function showMainDashboard() {
+        document.getElementById("login-screen").style.display = "none";
+        document.getElementById("main-dashboard").style.display = "block";
+        document.getElementById("username-display").textContent = currentUser;
+        document.getElementById("role-display").textContent = userRole;
+      }
+
+      async function handleLogin(event) {
+        event.preventDefault();
+
+        const username = document.getElementById("login-username").value.trim();
+        const password = document.getElementById("login-password").value.trim();
+        const errorDiv = document.getElementById("login-error");
+
+        if (!username || !password) {
+          showLoginError("Username and password are required");
+          return;
+        }
+
+        try {
+          const result = await makeRequest("/security/login", "POST", {
+            username: username,
+            password: password,
+          });
+
+          if (result.ok && result.status === 200) {
+            const response = JSON.parse(result.body);
+
+            // Save session information
+            authToken = response.token;
+            currentUser = username;
+            userRole = response.role;
+
+            localStorage.setItem("authToken", authToken);
+            localStorage.setItem("currentUser", currentUser);
+            localStorage.setItem("userRole", userRole);
+
+            // Display the main dashboard
+            showMainDashboard();
+            refreshDashboard();
+
+            // Reset the login form
+            document.getElementById("login-username").value = "";
+            document.getElementById("login-password").value = "";
+            errorDiv.style.display = "none";
+          } else {
+            showLoginError(result.body || "Login failed");
+          }
+        } catch (error) {
+          showLoginError("Network error: " + error.message);
+        }
+      }
+
+      function showLoginError(message) {
+        const errorDiv = document.getElementById("login-error");
+        errorDiv.textContent = message;
+        errorDiv.style.display = "block";
+      }
+
+      function handleLogout() {
+        // Clear session information
+        authToken = null;
+        currentUser = null;
+        userRole = null;
+
+        localStorage.removeItem("authToken");
+        localStorage.removeItem("currentUser");
+        localStorage.removeItem("userRole");
+
+        // Show login screen
+        showLoginScreen();
+      }
+
+      // ===== HTTP Request Helper =====
+      async function makeRequest(url, method = "GET", body = null) {
+        try {
+          const options = {
+            method,
+            headers: {
+              "Content-Type": "application/json",
+            },
+          };
+
+          // Add JWT token to Authorization header for protected endpoints
+          const publicEndpoints = ['/security/login', '/metrics', '/console', '/dashboard', '/health', '/api/cluster-health'];
+          const isPublicEndpoint = publicEndpoints.some(endpoint => url.startsWith(endpoint));
+
+          if (authToken && !isPublicEndpoint) {
+            options.headers.Authorization = `Bearer ${authToken}`;
+          }
+
+          if (body) {
+            options.body = JSON.stringify(body);
+          }
+
+          const response = await fetch(url, options);
+          const text = await response.text();
+
+          // Handle authentication errors
+          if (response.status === 401) {
+            handleLogout();
+            return { ok: false, status: response.status, body: "Authentication required. Please login again." };
+          }
+
+          return { ok: response.ok, status: response.status, body: text };
+        } catch (error) {
+          return { ok: false, status: "Error", body: error.message };
+        }
+      }
+
+      // ===== Dashboard Data Functions =====
+      async function refreshDashboard() {
+        await Promise.all([
+          refreshClusterHealth(),
+          refreshThroughput(),
+          refreshPerformance(),
+          refreshStorage(),
+          loadDashboardData()
+        ]);
+      }
+
+      async function refreshClusterHealth() {
+        try {
+          const result = await makeRequest("/api/cluster-health");
+          if (result.ok) {
+            const data = JSON.parse(result.body);
+            document.getElementById("cluster-status").innerHTML =
+              `<span class="status-indicator status-${data.status === 'healthy' ? 'healthy' : 'error'}"></span>${data.status}`;
+            document.getElementById("active-brokers").textContent = data.active_brokers || 0;
+            document.getElementById("total-topics").textContent = data.total_topics || 0;
+          }
+        } catch (error) {
+          console.error("Failed to refresh cluster health:", error);
+        }
+      }
+
+      async function refreshThroughput() {
+        try {
+          const result = await makeRequest("/api/dashboard");
+          if (result.ok) {
+            const data = JSON.parse(result.body);
+            const throughput = data.throughput || {};
+            document.getElementById("messages-per-sec").textContent = throughput.messages_in_per_sec || 0;
+            document.getElementById("bytes-in").textContent = formatBytes(throughput.bytes_in_per_sec || 0);
+            document.getElementById("bytes-out").textContent = formatBytes(throughput.bytes_out_per_sec || 0);
+          }
+        } catch (error) {
+          console.error("Failed to refresh throughput:", error);
+        }
+      }
+
+      async function refreshPerformance() {
+        try {
+          const result = await makeRequest("/api/dashboard");
+          if (result.ok) {
+            const data = JSON.parse(result.body);
+            const performance = data.performance || {};
+            document.getElementById("avg-latency").textContent = (performance.avg_request_latency_ms || 0).toFixed(1);
+            document.getElementById("p99-latency").textContent = (performance.p99_request_latency_ms || 0).toFixed(1);
+          }
+        } catch (error) {
+          console.error("Failed to refresh performance:", error);
+        }
+      }
+
+      async function refreshStorage() {
+        try {
+          const result = await makeRequest("/api/dashboard");
+          if (result.ok) {
+            const data = JSON.parse(result.body);
+            const clusterHealth = data.cluster_health || {};
+            const storage = data.storage || {};
+            document.getElementById("total-messages").textContent = clusterHealth.total_messages || 0;
+            document.getElementById("log-size").textContent = formatBytes(storage.total_log_size_bytes || 0);
+          }
+        } catch (error) {
+          console.error("Failed to refresh storage:", error);
+        }
+      }
+
+      async function loadDashboardData() {
+        try {
+          const result = await makeRequest("/api/dashboard");
+          if (result.ok) {
+            const data = JSON.parse(result.body);
+            document.getElementById("metrics-content").innerHTML =
+              `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+          } else {
+            document.getElementById("metrics-content").innerHTML =
+              `<div style="color: red;">Failed to load dashboard data: ${result.body}</div>`;
+          }
+        } catch (error) {
+          document.getElementById("metrics-content").innerHTML =
+            `<div style="color: red;">Error loading dashboard data: ${error.message}</div>`;
+        }
+      }
+
+      // ===== Utility Functions =====
+      function formatBytes(bytes) {
+        if (bytes === 0) return '0 B';
+        const k = 1024;
+        const sizes = ['B', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
       }
     </script>
   </body>
@@ -955,6 +1543,52 @@ async fn cluster_health_api(data: web::Data<AppState>) -> impl Responder {
     HttpResponse::Ok().json(health_data)
 }
 
+/// Simple health check endpoint
+async fn health_check(data: web::Data<AppState>) -> impl Responder {
+    let brokers = data.brokers.lock().unwrap();
+    let active_brokers = brokers.len();
+
+    let health_status = serde_json::json!({
+        "status": if active_brokers > 0 { "healthy" } else { "unhealthy" },
+        "active_brokers": active_brokers,
+        "timestamp": chrono::Utc::now().to_rfc3339(),
+        "service": "pilgrimage-broker"
+    });
+
+    if active_brokers > 0 {
+        HttpResponse::Ok().json(health_status)
+    } else {
+        HttpResponse::ServiceUnavailable().json(health_status)
+    }
+}
+
+/// Individual broker health check endpoint
+async fn broker_health_check(path: web::Path<String>, data: web::Data<AppState>) -> impl Responder {
+    let broker_id = path.into_inner();
+    let brokers = data.brokers.lock().unwrap();
+
+    if let Some(broker_wrapper) = brokers.get(&broker_id) {
+        let is_healthy = broker_wrapper.is_healthy();
+        let health_status = serde_json::json!({
+            "broker_id": broker_id,
+            "status": if is_healthy { "healthy" } else { "unhealthy" },
+            "timestamp": chrono::Utc::now().to_rfc3339()
+        });
+
+        if is_healthy {
+            HttpResponse::Ok().json(health_status)
+        } else {
+            HttpResponse::ServiceUnavailable().json(health_status)
+        }
+    } else {
+        HttpResponse::NotFound().json(serde_json::json!({
+            "error": format!("Broker '{}' not found", broker_id),
+            "status": "not_found",
+            "timestamp": chrono::Utc::now().to_rfc3339()
+        }))
+    }
+}
+
 /// Topic details API endpoint for comprehensive topic information
 async fn topic_details_api(data: web::Data<AppState>) -> impl Responder {
     let brokers = data.brokers.lock().unwrap();
@@ -1095,7 +1729,7 @@ async fn security_login(
         return Ok(HttpResponse::BadRequest().json("Password cannot be empty"));
     }
 
-    // Basic credential validation
+    // Basic credential validation (same as before for simplicity)
     let (is_valid, role) = match (info.username.as_str(), info.password.as_str()) {
         ("admin", "password") => (true, "admin"),
         ("user", "password") => (true, "user"),
@@ -1116,24 +1750,38 @@ async fn security_login(
         return Ok(HttpResponse::Unauthorized().json("Invalid username or password"));
     }
 
-    // Generate a simple token (in production, use JWT or similar)
-    let token = format!("token_{}", Uuid::new_v4());
+    // Generate JWT token using the distributed authenticator
+    match data.jwt_authenticator.authenticate_client(&info.username, &info.password) {
+        auth_result if auth_result.success => {
+            // Log successful security event
+            let _ = data
+                .security_manager
+                .log_simple_security_event(
+                    "user_login",
+                    &info.username,
+                    &format!("User {} logged in with JWT authentication", info.username),
+                    true,
+                )
+                .await;
 
-    // Log successful security event
-    let _ = data
-        .security_manager
-        .log_simple_security_event(
-            "user_login",
-            &info.username,
-            &format!("User {} logged in with role {}", info.username, role),
-            true,
-        )
-        .await;
-
-    Ok(HttpResponse::Ok().json(SecurityLoginResponse {
-        token,
-        role: role.to_string(),
-    }))
+            Ok(HttpResponse::Ok().json(SecurityLoginResponse {
+                token: auth_result.token.unwrap_or_default(),
+                role: role.to_string(),
+            }))
+        }
+        auth_result => {
+            let _ = data
+                .security_manager
+                .log_simple_security_event(
+                    "login_failed",
+                    &info.username,
+                    &format!("JWT authentication failed: {:?}", auth_result.error_message),
+                    false,
+                )
+                .await;
+            Ok(HttpResponse::Unauthorized().json("Invalid username or password"))
+        }
+    }
 }
 
 /// Security role assignment endpoint
@@ -1279,41 +1927,67 @@ pub async fn run_server() -> std::io::Result<()> {
     println!("✅ Security manager initialized with comprehensive security features");
 
     println!("🗂️  Setting up application state...");
+
+    // Initialize JWT authenticator with shared secret (same as CLI)
+    println!("🔑 Setting up JWT authentication...");
+    let jwt_secret = get_jwt_secret_for_web()?;
+    let mut jwt_authenticator = DistributedAuthenticator::new(
+        jwt_secret,
+        "pilgrimage-web".to_string(),
+    );
+
+    // Pre-configure demo users (in production, these should come from a database)
+    jwt_authenticator.add_user("admin", "password");
+    jwt_authenticator.add_user("user", "password");
+    jwt_authenticator.add_user("guest", "guest");
+
+    jwt_authenticator.add_user_permissions("admin".to_string(), vec!["read".to_string(), "write".to_string(), "admin".to_string()]);
+    jwt_authenticator.add_user_permissions("user".to_string(), vec!["read".to_string(), "write".to_string()]);
+    jwt_authenticator.add_user_permissions("guest".to_string(), vec!["read".to_string()]);
+
+    let jwt_authenticator = Arc::new(jwt_authenticator);
+    println!("✅ JWT authentication configured");
+
     let state = AppState {
         brokers: Arc::new(Mutex::new(HashMap::new())),
         security_manager,
+        jwt_authenticator,
     };
     println!("✅ Application state configured");
 
     println!("🌐 Configuring HTTP server and routes...");
     let server = HttpServer::new(move || {
+        // Create JWT auth middleware
+        let jwt_auth = JwtAuth::new().expect("Failed to create JWT auth middleware");
+
         App::new()
             .app_data(web::Data::new(state.clone()))
-            .route("/start", web::post().to(start_broker))
-            .route("/stop", web::post().to(stop_broker))
-            .route("/send", web::post().to(send_message))
-            .route("/consume", web::post().to(consume_messages))
-            .route("/status", web::post().to(broker_status))
-            .route("/metrics", web::get().to(metrics))
-            // .route("/health", web::get().to(health_check))
-            // .route("/health/{broker_id}", web::get().to(broker_health_check))
-            .route("/dashboard", web::get().to(dashboard_html))
+            // Public endpoints (no authentication required)
             .route("/console", web::get().to(console_html))
             .route("/test", web::get().to(test_console_html)) // Legacy support
-            .route("/api/dashboard", web::get().to(dashboard_api))
+            .route("/dashboard", web::get().to(dashboard_html))
+            .route("/metrics", web::get().to(metrics))
+            // Health check endpoints (monitoring systems need access)
+            .route("/health", web::get().to(health_check))
+            .route("/health/{broker_id}", web::get().to(broker_health_check))
             .route("/api/cluster-health", web::get().to(cluster_health_api))
-            .route("/api/topic-details", web::get().to(topic_details_api))
-            // Security endpoints
+            // Security login endpoint (no auth required for login)
             .route("/security/login", web::post().to(security_login))
-            .route(
-                "/security/assign-role",
-                web::post().to(security_assign_role),
+            // Protected endpoints (JWT authentication required)
+            .service(
+                web::scope("")
+                    .wrap(jwt_auth)
+                    .route("/start", web::post().to(start_broker))
+                    .route("/stop", web::post().to(stop_broker))
+                    .route("/send", web::post().to(send_message))
+                    .route("/consume", web::post().to(consume_messages))
+                    .route("/status", web::post().to(broker_status))
+                    .route("/api/dashboard", web::get().to(dashboard_api))
+                    .route("/api/topic-details", web::get().to(topic_details_api))
+                    .route("/security/assign-role", web::post().to(security_assign_role))
+                    .route("/security/check-permission", web::post().to(security_check_permission))
+                    .route("/security/status", web::get().to(security_status))
             )
-            .route(
-                "/security/check-permission",
-                web::post().to(security_check_permission),
-            )
-            .route("/security/status", web::get().to(security_status))
     })
     .bind(("127.0.0.1", 8080))?;
 
@@ -1337,6 +2011,33 @@ mod tests {
     use actix_web::{App, test, web};
     use serde_json::json;
 
+    /// Helper function to create AppState for tests
+    async fn create_test_app_state() -> AppState {
+        let security_manager = Arc::new(
+            SecurityManager::new(SecurityConfig::default())
+                .await
+                .expect("Failed to initialize security manager"),
+        );
+
+        // Create a test JWT authenticator
+        let jwt_secret = DistributedAuthenticator::generate_jwt_secret();
+        let mut jwt_authenticator = DistributedAuthenticator::new(
+            jwt_secret,
+            "pilgrimage-test".to_string(),
+        );
+
+        // Add test users
+        jwt_authenticator.add_user("admin", "password");
+        jwt_authenticator.add_user("user", "password");
+        jwt_authenticator.add_user("guest", "guest");
+
+        AppState {
+            brokers: Arc::new(Mutex::new(HashMap::new())),
+            security_manager,
+            jwt_authenticator: Arc::new(jwt_authenticator),
+        }
+    }
+
     /// Test for starting a new broker.
     ///
     /// # Purpose
@@ -1355,15 +2056,7 @@ mod tests {
         let test_id = uuid::Uuid::new_v4().to_string();
         let storage_path = format!("./target/test_storage_{}", test_id);
 
-        let security_manager = Arc::new(
-            SecurityManager::new(SecurityConfig::default())
-                .await
-                .expect("Failed to initialize security manager"),
-        );
-        let state = AppState {
-            brokers: Arc::new(Mutex::new(HashMap::new())),
-            security_manager,
-        };
+        let state = create_test_app_state().await;
 
         let mut app = test::init_service(
             App::new()
@@ -1971,6 +2664,10 @@ mod tests {
         let app_state = AppState {
             brokers: Arc::new(Mutex::new(HashMap::new())),
             security_manager,
+            jwt_authenticator: Arc::new(DistributedAuthenticator::new(
+                DistributedAuthenticator::generate_jwt_secret(),
+                "test".to_string(),
+            )),
         };
 
         let srv = actix_test::start(move || {
@@ -2126,5 +2823,42 @@ mod tests {
 
         let resp = test::call_service(&mut app, req).await;
         assert!(resp.status().is_success());
+    }
+}
+
+/// Get JWT secret for web console (shared with CLI authentication)
+fn get_jwt_secret_for_web() -> std::io::Result<Vec<u8>> {
+    use std::fs;
+    use std::path::PathBuf;
+
+    let session_dir = if let Some(home_dir) = dirs::home_dir() {
+        home_dir.join(".pilgrimage")
+    } else {
+        PathBuf::from(".pilgrimage")
+    };
+
+    let secret_file = session_dir.join("jwt_secret");
+
+    if secret_file.exists() {
+        let secret_data = fs::read(&secret_file)?;
+        if secret_data.len() == 32 {
+            Ok(secret_data)
+        } else {
+            // If the secret is invalid, create a new one
+            if !session_dir.exists() {
+                fs::create_dir_all(&session_dir)?;
+            }
+            let secret = DistributedAuthenticator::generate_jwt_secret();
+            fs::write(&secret_file, &secret)?;
+            Ok(secret)
+        }
+    } else {
+        // If no secret exists, create one
+        if !session_dir.exists() {
+            fs::create_dir_all(&session_dir)?;
+        }
+        let secret = DistributedAuthenticator::generate_jwt_secret();
+        fs::write(&secret_file, &secret)?;
+        Ok(secret)
     }
 }

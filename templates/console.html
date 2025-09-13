@@ -667,6 +667,7 @@ Hello from Pilgrimage Web Console!</textarea
 
     <script>
       let performanceMonitorInterval = null;
+      // Monitoring variables
       let isMonitoring = false;
       let websocket = null;
       let isSubscribed = false;
@@ -691,20 +692,75 @@ Hello from Pilgrimage Web Console!</textarea
       // Utility functions
       async function makeRequest(url, method = "GET", body = null) {
         try {
+          console.log(`Making request to ${method} ${url}`, body);
+
           const options = {
             method,
             headers: {
               "Content-Type": "application/json",
             },
           };
+
+          // Add JWT token to Authorization header for protected endpoints
+          const publicEndpoints = [
+            "/security/login",
+            "/metrics",
+            "/console",
+            "/test",
+            "/health",
+            "/api/cluster-health",
+            "/dashboard",
+          ];
+          const isPublicEndpoint = publicEndpoints.some((endpoint) =>
+            url.startsWith(endpoint)
+          );
+
+          if (authToken && !isPublicEndpoint) {
+            console.log(
+              "Adding authorization header with token:",
+              authToken.substring(0, 20) + "..."
+            );
+            options.headers.Authorization = `Bearer ${authToken}`;
+          } else {
+            console.log("Public endpoint or no token available");
+          }
+
           if (body) {
             options.body = JSON.stringify(body);
           }
 
           const response = await fetch(url, options);
           const text = await response.text();
+
+          console.log(
+            `Response status: ${response.status}, ok: ${response.ok}`
+          );
+
+          // Handle authentication errors
+          if (response.status === 401) {
+            console.log(
+              "401 error received, clearing session and showing login"
+            );
+            // Only clear session if we actually had a token (not for public endpoints)
+            if (authToken && !isPublicEndpoint) {
+              authToken = null;
+              currentUser = null;
+              userRole = null;
+              localStorage.removeItem("authToken");
+              localStorage.removeItem("currentUser");
+              localStorage.removeItem("userRole");
+              showLoginScreen();
+            }
+            return {
+              status: response.status,
+              body: "Authentication required. Please login again.",
+              ok: false,
+            };
+          }
+
           return { status: response.status, body: text, ok: response.ok };
         } catch (error) {
+          console.error("Request error:", error);
           return { status: "Error", body: error.message, ok: false };
         }
       }
@@ -1161,8 +1217,12 @@ Hello from Pilgrimage Web Console!</textarea
       document.addEventListener("DOMContentLoaded", function () {
         updateSystemStatus();
 
-        // Auto-refresh system status every 10 seconds for better responsiveness
-        setInterval(updateSystemStatus, 10000);
+        // Auto-refresh system status every 10 seconds, but only when authenticated
+        setInterval(() => {
+          if (authToken) {
+            updateSystemStatus();
+          }
+        }, 10000);
 
         // Cleanup on page unload
         window.addEventListener("beforeunload", function () {
@@ -1235,11 +1295,18 @@ Hello from Pilgrimage Web Console!</textarea
 
           if (result.ok && result.status === 200) {
             const response = JSON.parse(result.body);
+            console.log("Login successful, response:", response);
 
             // Save session information
             authToken = response.token;
             currentUser = username;
             userRole = response.role;
+
+            console.log(
+              "Saved auth token:",
+              authToken ? authToken.substring(0, 20) + "..." : "null"
+            );
+            console.log("Saved user:", currentUser, "role:", userRole);
 
             localStorage.setItem("authToken", authToken);
             localStorage.setItem("currentUser", currentUser);

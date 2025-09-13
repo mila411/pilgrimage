@@ -315,6 +315,15 @@ impl DistributedAuthenticator {
         Ok(token)
     }
 
+    /// Decode client token to get claims
+    pub fn decode_client_token(&self, token: &str) -> Result<ClientClaims, Box<dyn std::error::Error>> {
+        let validation = Validation::new(Algorithm::HS256);
+        let decoding_key = DecodingKey::from_secret(&self.jwt_secret);
+
+        let token_data = decode::<ClientClaims>(token, &decoding_key, &validation)?;
+        Ok(token_data.claims)
+    }
+
     /// Check if a token has specific permission
     pub fn has_permission(&self, token: &str, required_permission: &str) -> bool {
         let validation_result = self.validate_token(token);

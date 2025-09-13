@@ -66,6 +66,7 @@ pub mod authorization;
 pub mod jwt_auth;
 pub mod token;
 pub mod cli_auth;
+pub mod web_middleware;
 
 #[cfg(test)]
 mod tests;
@@ -78,3 +79,4 @@ pub use authentication::{Authenticator, BasicAuthenticator};
 pub use jwt_auth::{AuthenticationResult, DistributedAuthenticator, ValidationResult};
 pub use token::TokenManager;
 pub use cli_auth::{CliAuthManager, CliSession, CliAuthError};
+pub use web_middleware::{JwtAuth, WebAuthError, get_authenticated_user_claims};

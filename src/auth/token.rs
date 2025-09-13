@@ -31,7 +31,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 /// The struct can be serialized and deserialized.
 ///
 /// [claims]: https://auth0.com/docs/secure/tokens/json-web-tokens/json-web-token-claims
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Claims {
     /// The subject of the token, which is the username.
     pub sub: String,
