@@ -37,14 +37,14 @@ impl PidManager {
         } else {
             std::env::temp_dir()
         };
-        
+
         base_dir.join(format!("pilgrimage_broker_{}.pid", broker_id))
     }
 
     /// Create and write the PID file
     pub fn create_pid_file(&self) -> Result<(), std::io::Error> {
         let current_pid = process::id();
-        
+
         // Check if PID file already exists
         if self.pid_file_path.exists() {
             match self.read_pid_file() {
@@ -80,9 +80,9 @@ impl PidManager {
 
         // Write the current PID
         fs::write(&self.pid_file_path, current_pid.to_string())?;
-        info!("Created PID file for broker {}: {} (PID: {})", 
+        info!("Created PID file for broker {}: {} (PID: {})",
               self.broker_id, self.pid_file_path.display(), current_pid);
-        
+
         Ok(())
     }
 
@@ -100,7 +100,7 @@ impl PidManager {
     pub fn remove_pid_file(&self) -> Result<(), std::io::Error> {
         if self.pid_file_path.exists() {
             fs::remove_file(&self.pid_file_path)?;
-            info!("Removed PID file for broker {}: {}", 
+            info!("Removed PID file for broker {}: {}",
                   self.broker_id, self.pid_file_path.display());
         }
         Ok(())
@@ -121,13 +121,13 @@ impl PidManager {
         #[cfg(unix)]
         {
             use std::process::Command;
-            
+
             // Use kill with signal 0 to check if process exists
             let output = Command::new("kill")
                 .arg("-0")
                 .arg(pid.to_string())
                 .output();
-                
+
             match output {
                 Ok(output) => output.status.success(),
                 Err(_) => false,
@@ -137,14 +137,14 @@ impl PidManager {
         #[cfg(windows)]
         {
             use std::process::Command;
-            
+
             // Use tasklist to check if process exists
             let output = Command::new("tasklist")
                 .arg("/FI")
                 .arg(format!("PID eq {}", pid))
                 .arg("/NH")
                 .output();
-                
+
             match output {
                 Ok(output) => {
                     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -201,12 +201,12 @@ impl PidManager {
     pub fn send_signal(&self, signal: i32) -> Result<(), std::io::Error> {
         if let Some(pid) = self.get_running_broker_pid() {
             use std::process::Command;
-            
+
             let status = Command::new("kill")
                 .arg(format!("-{}", signal))
                 .arg(pid.to_string())
                 .status()?;
-                
+
             if status.success() {
                 info!("Sent signal {} to broker {} (PID: {})", signal, self.broker_id, pid);
                 Ok(())
@@ -241,16 +241,16 @@ impl PidManager {
     pub fn terminate_process(&self, force: bool) -> Result<(), std::io::Error> {
         if let Some(pid) = self.get_running_broker_pid() {
             use std::process::Command;
-            
+
             let mut cmd = Command::new("taskkill");
             cmd.arg("/PID").arg(pid.to_string());
-            
+
             if force {
                 cmd.arg("/F");
             }
-            
+
             let status = cmd.status()?;
-            
+
             if status.success() {
                 info!("Terminated broker {} (PID: {})", self.broker_id, pid);
                 Ok(())
@@ -288,18 +288,18 @@ mod tests {
     fn test_pid_manager_basic() {
         let temp_dir = tempdir().unwrap();
         let pid_manager = PidManager::new_with_dir("test_broker".to_string(), temp_dir.path());
-        
+
         // Should not exist initially
         assert!(!pid_manager.pid_file_exists());
-        
+
         // Create PID file
         pid_manager.create_pid_file().unwrap();
         assert!(pid_manager.pid_file_exists());
-        
+
         // Read PID should match current process
         let read_pid = pid_manager.read_pid_file().unwrap();
         assert_eq!(read_pid, process::id());
-        
+
         // Remove PID file
         pid_manager.remove_pid_file().unwrap();
         assert!(!pid_manager.pid_file_exists());
@@ -309,11 +309,11 @@ mod tests {
     fn test_stale_pid_cleanup() {
         let temp_dir = tempdir().unwrap();
         let pid_manager = PidManager::new_with_dir("test_broker".to_string(), temp_dir.path());
-        
+
         // Create a fake PID file with a non-existent PID
         let fake_pid = 999999u32;
         fs::write(pid_manager.get_pid_file_path_str(), fake_pid.to_string()).unwrap();
-        
+
         // Cleanup should remove the stale file
         pid_manager.cleanup_stale_pid_file().unwrap();
         assert!(!pid_manager.pid_file_exists());
@@ -323,13 +323,13 @@ mod tests {
     fn test_get_running_broker_pid() {
         let temp_dir = tempdir().unwrap();
         let pid_manager = PidManager::new_with_dir("test_broker".to_string(), temp_dir.path());
-        
+
         // No PID file initially
         assert!(pid_manager.get_running_broker_pid().is_none());
-        
+
         // Create PID file
         pid_manager.create_pid_file().unwrap();
-        
+
         // Should return current PID
         let running_pid = pid_manager.get_running_broker_pid();
         assert!(running_pid.is_some());

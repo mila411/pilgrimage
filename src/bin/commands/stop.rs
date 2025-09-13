@@ -42,7 +42,7 @@ pub async fn handle_stop_command(matches: &ArgMatches) -> CliResult<()> {
         match stop_broker_via_api(id).await {
             Ok(_) => {
                 info!("Broker {} stopped gracefully via API", id);
-                
+
                 // Wait for process to actually stop
                 if wait_for_process_stop(&pid_manager, Duration::from_secs(timeout_secs)).await {
                     info!("Broker {} stopped successfully", id);
@@ -59,7 +59,7 @@ pub async fn handle_stop_command(matches: &ArgMatches) -> CliResult<()> {
 
     // Signal-based shutdown
     info!("Attempting signal-based shutdown...");
-    
+
     #[cfg(unix)]
     {
         if !force {
@@ -67,7 +67,7 @@ pub async fn handle_stop_command(matches: &ArgMatches) -> CliResult<()> {
             match pid_manager.send_sigterm() {
                 Ok(_) => {
                     info!("Sent SIGTERM to broker {} (PID: {})", id, pid);
-                    
+
                     // Wait for graceful shutdown
                     if wait_for_process_stop(&pid_manager, Duration::from_secs(timeout_secs)).await {
                         info!("Broker {} stopped gracefully", id);
@@ -86,7 +86,7 @@ pub async fn handle_stop_command(matches: &ArgMatches) -> CliResult<()> {
         match pid_manager.send_sigkill() {
             Ok(_) => {
                 info!("Sent SIGKILL to broker {} (PID: {})", id, pid);
-                
+
                 // Wait a short time for force kill to take effect
                 if wait_for_process_stop(&pid_manager, Duration::from_secs(5)).await {
                     info!("Broker {} terminated forcefully", id);
@@ -110,7 +110,7 @@ pub async fn handle_stop_command(matches: &ArgMatches) -> CliResult<()> {
         match pid_manager.terminate_process(force) {
             Ok(_) => {
                 info!("Terminated broker {} (PID: {})", id, pid);
-                
+
                 // Wait for termination
                 let wait_timeout = if force { Duration::from_secs(5) } else { Duration::from_secs(timeout_secs) };
                 if wait_for_process_stop(&pid_manager, wait_timeout).await {
@@ -134,15 +134,15 @@ pub async fn handle_stop_command(matches: &ArgMatches) -> CliResult<()> {
 /// Wait for a process to stop with timeout
 async fn wait_for_process_stop(pid_manager: &PidManager, timeout: Duration) -> bool {
     let start_time = std::time::Instant::now();
-    
+
     while start_time.elapsed() < timeout {
         if pid_manager.get_running_broker_pid().is_none() {
             return true;
         }
-        
+
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
-    
+
     false
 }
 

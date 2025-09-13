@@ -574,7 +574,7 @@ impl DistributedBroker {
         // Stop split-brain prevention
         info!("Stopping split-brain prevention...");
         // Note: Add stop method to split-brain prevention if not present
-        
+
         // Cleanup resources
         info!("Cleaning up resources...");
         if let Err(errors) = self.resource_manager.cleanup_all() {
@@ -664,7 +664,7 @@ impl DistributedBroker {
                 tokio::time::sleep(Duration::from_millis(100)).await;
             }
         });
-        
+
         self.task_manager.register_task("replication_manager".to_string(), replication_task);
     }
 
@@ -758,7 +758,7 @@ impl DistributedBroker {
                 tokio::time::sleep(Duration::from_secs(5)).await;
             }
         });
-        
+
         self.task_manager.register_task("cluster_monitoring".to_string(), monitoring_task);
     }
 
@@ -1000,7 +1000,7 @@ impl DistributedBroker {
                     tokio::time::sleep(Duration::from_secs(5)).await;
                 }
             });
-            
+
             self.task_manager.register_task("metrics_collection".to_string(), metrics_task);
 
             info!("Metrics collection started");
@@ -1096,23 +1096,23 @@ impl DistributedBroker {
     async fn start_shutdown_monitoring(&self) {
         let shutdown_manager = self.shutdown_manager.clone();
         let broker = self.clone();
-        
+
         let shutdown_task = tokio::spawn(async move {
             // Wait for shutdown signal
             shutdown_manager.wait_for_shutdown().await;
-            
+
             info!("Shutdown signal received, initiating graceful shutdown...");
-            
+
             // Perform graceful shutdown
             if let Err(e) = broker.stop().await {
                 error!("Failed to shutdown gracefully: {}", e);
                 std::process::exit(1);
             }
-            
+
             info!("Graceful shutdown completed successfully");
             std::process::exit(0);
         });
-        
+
         self.task_manager.register_task("shutdown_monitor".to_string(), shutdown_task);
     }
 }

@@ -138,7 +138,7 @@ impl GracefulShutdown {
     /// Wait for shutdown completion with timeout
     pub async fn wait_for_completion(&self) -> ShutdownResult {
         let timeout_duration = self.timeout;
-        
+
         tokio::select! {
             _ = async {
                 while !self.shutdown_completed.load(Ordering::SeqCst) {
@@ -192,7 +192,7 @@ impl TaskManager {
     /// Register a task for graceful shutdown
     pub fn register_task(&self, name: String, handle: tokio::task::JoinHandle<()>) {
         let task_handle = TaskHandle::new(name, handle);
-        
+
         if let Ok(mut tasks) = self.active_tasks.lock() {
             tasks.push(task_handle);
         }
@@ -219,10 +219,10 @@ impl TaskManager {
 
         // Wait for all tasks to complete or timeout
         let timeout = self.shutdown.get_timeout();
-        
+
         for mut task in tasks {
             let task_name = task.name.clone();
-            
+
             tokio::select! {
                 result = &mut task.handle => {
                     match result {
@@ -283,7 +283,7 @@ impl ResourceManager {
     }
 
     /// Register a cleanup callback
-    pub fn register_cleanup<F>(&self, callback: F) 
+    pub fn register_cleanup<F>(&self, callback: F)
     where
         F: Fn() -> Result<(), String> + Send + Sync + 'static,
     {
@@ -347,14 +347,14 @@ mod tests {
     #[tokio::test]
     async fn test_graceful_shutdown_basic() {
         let shutdown = GracefulShutdown::new(Duration::from_secs(1));
-        
+
         assert!(!shutdown.is_shutdown_requested());
-        
+
         shutdown.initiate_shutdown();
         assert!(shutdown.is_shutdown_requested());
-        
+
         shutdown.mark_shutdown_completed();
-        
+
         let result = shutdown.wait_for_completion().await;
         assert_eq!(result, ShutdownResult::Completed);
     }
@@ -362,9 +362,9 @@ mod tests {
     #[tokio::test]
     async fn test_shutdown_timeout() {
         let shutdown = GracefulShutdown::new(Duration::from_millis(100));
-        
+
         shutdown.initiate_shutdown();
-        
+
         // Don't mark as completed, should timeout
         let result = shutdown.wait_for_completion().await;
         assert_eq!(result, ShutdownResult::Timeout);
@@ -374,14 +374,14 @@ mod tests {
     async fn test_task_manager() {
         let shutdown = GracefulShutdown::new(Duration::from_secs(1));
         let task_manager = TaskManager::new(shutdown);
-        
+
         // Register a simple task
         let handle = tokio::spawn(async {
             tokio::time::sleep(Duration::from_millis(10)).await;
         });
-        
+
         task_manager.register_task("test_task".to_string(), handle);
-        
+
         // Shutdown should complete successfully
         let result = task_manager.shutdown_all_tasks().await;
         assert!(result.is_ok());
@@ -390,7 +390,7 @@ mod tests {
     #[tokio::test]
     async fn test_resource_manager() {
         let resource_manager = ResourceManager::new();
-        
+
         let cleanup_called = Arc::new(AtomicBool::new(false));
         let flag = cleanup_called.clone();
 
@@ -398,7 +398,7 @@ mod tests {
             flag.store(true, Ordering::SeqCst);
             Ok(())
         });
-        
+
         let result = resource_manager.cleanup_all();
         assert!(result.is_ok());
         assert!(cleanup_called.load(Ordering::SeqCst));
