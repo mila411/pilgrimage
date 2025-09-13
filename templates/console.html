@@ -1,0 +1,1317 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Pilgrimage Web Console</title>
+    <style>
+      body {
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif,
+          "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji";
+        margin: 0;
+        padding: 0;
+        background-color: #f4f6f9;
+        color: #333;
+      }
+      /* ログイン画面のスタイル */
+      .login-container {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        min-height: 100vh;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      }
+      .login-box {
+        background: white;
+        padding: 40px;
+        border-radius: 8px;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+        width: 100%;
+        max-width: 400px;
+        text-align: center;
+      }
+      .login-box h1 {
+        color: #333;
+        margin-bottom: 30px;
+        font-size: 28px;
+      }
+      .login-form {
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+      }
+      .login-input {
+        padding: 12px 16px;
+        border: 1px solid #ddd;
+        border-radius: 6px;
+        font-size: 16px;
+        transition: border-color 0.3s;
+      }
+      .login-input:focus {
+        outline: none;
+        border-color: #667eea;
+        box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+      }
+      .login-button {
+        padding: 12px 24px;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border: none;
+        border-radius: 6px;
+        font-size: 16px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: transform 0.2s;
+      }
+      .login-button:hover {
+        transform: translateY(-2px);
+      }
+      .login-error {
+        color: #dc3545;
+        font-size: 14px;
+        margin-top: 10px;
+      }
+      .login-info {
+        background: #e7f3ff;
+        border: 1px solid #b3d9ff;
+        border-radius: 4px;
+        padding: 15px;
+        margin: 20px 0;
+        font-size: 14px;
+        color: #0066cc;
+        text-align: left;
+      }
+      /* メインコンソールのスタイル */
+      .main-console {
+        display: none;
+      }
+      .header {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 20px;
+        text-align: center;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        position: relative;
+      }
+      .logout-button {
+        position: absolute;
+        right: 20px;
+        top: 50%;
+        transform: translateY(-50%);
+        background: rgba(255, 255, 255, 0.2);
+        color: white;
+        border: 1px solid rgba(255, 255, 255, 0.3);
+        padding: 8px 16px;
+        border-radius: 4px;
+        cursor: pointer;
+        transition: background 0.3s;
+      }
+      .logout-button:hover {
+        background: rgba(255, 255, 255, 0.3);
+      }
+      .user-info {
+        position: absolute;
+        left: 20px;
+        top: 50%;
+        transform: translateY(-50%);
+        font-size: 14px;
+        opacity: 0.9;
+      }
+      .container {
+        max-width: 1400px;
+        margin: 0 auto;
+        padding: 20px;
+      }
+      .tabs {
+        display: flex;
+        background: white;
+        border-radius: 8px;
+        margin-bottom: 20px;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        overflow: hidden;
+      }
+      .tab {
+        flex: 1;
+        padding: 15px 20px;
+        cursor: pointer;
+        border: none;
+        background: white;
+        transition: all 0.3s ease;
+        font-size: 14px;
+        font-weight: 500;
+        text-align: center;
+        opacity: 0.6;
+        color: #666;
+      }
+      .tab.active {
+        background: #667eea;
+        color: white;
+        opacity: 1;
+        font-weight: 600;
+        box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+      }
+      .tab:hover:not(.active) {
+        background: #f8f9fa;
+        opacity: 0.8;
+        color: #333;
+      }
+      .tab-content {
+        display: none;
+        animation: fadeIn 0.3s ease-in;
+      }
+      .tab-content.active {
+        display: block;
+      }
+      @keyframes fadeIn {
+        from {
+          opacity: 0;
+          transform: translateY(10px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+      .endpoint {
+        background: white;
+        margin: 15px 0;
+        padding: 20px;
+        border-radius: 8px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        border-left: 4px solid #667eea;
+      }
+      .endpoint h3 {
+        margin-top: 0;
+        color: #667eea;
+        border-bottom: 1px solid #eee;
+        padding-bottom: 10px;
+      }
+      .form-group {
+        margin: 10px 0;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+      .form-group label {
+        min-width: 100px;
+        font-weight: 500;
+      }
+      input,
+      textarea,
+      select {
+        padding: 8px 12px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        font-size: 14px;
+        min-width: 200px;
+      }
+      input:focus,
+      textarea:focus,
+      select:focus {
+        outline: none;
+        border-color: #667eea;
+        box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.2);
+      }
+      button {
+        padding: 10px 20px;
+        margin: 5px;
+        border: none;
+        border-radius: 4px;
+        background: #667eea;
+        color: white;
+        cursor: pointer;
+        font-size: 14px;
+        font-weight: 500;
+        transition: all 0.2s ease;
+      }
+      button:hover {
+        background: #5a6fd8;
+        transform: translateY(-1px);
+        box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+      }
+      button.secondary {
+        background: #6c757d;
+      }
+      button.secondary:hover {
+        background: #5a6268;
+      }
+      button.danger {
+        background: #dc3545;
+      }
+      button.danger:hover {
+        background: #c82333;
+      }
+      .result {
+        margin-top: 15px;
+        padding: 15px;
+        background: #f8f9fa;
+        border-radius: 4px;
+        font-family: "Courier New", monospace;
+        font-size: 12px;
+        white-space: pre-wrap;
+        border-left: 4px solid #28a745;
+        max-height: 300px;
+        overflow-y: auto;
+      }
+      .result.error {
+        border-left-color: #dc3545;
+        background: #f8d7da;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+        gap: 20px;
+      }
+      .status-indicator {
+        display: inline-block;
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        margin-right: 8px;
+      }
+      .info-box {
+        background: #e7f3ff;
+        border: 1px solid #b3d9ff;
+        border-radius: 4px;
+        padding: 10px;
+        margin: 10px 0;
+        font-size: 12px;
+        color: #0066cc;
+      }
+      .status-online {
+        background-color: #28a745;
+      }
+      .status-offline {
+        background-color: #dc3545;
+      }
+      .status-warning {
+        background-color: #ffc107;
+      }
+      .info-panel {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 15px;
+        border-radius: 8px;
+        margin-bottom: 20px;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- ログイン画面 -->
+    <div id="login-screen" class="login-container">
+      <div class="login-box">
+        <h1>🚀 Pilgrimage</h1>
+        <p style="color: #666; margin-bottom: 30px">Web Console Login</p>
+
+        <div class="login-info">
+          <strong>Valid Credentials:</strong><br />
+          • admin / password (Admin role)<br />
+          • user / password (User role)<br />
+          • guest / guest (Guest role)
+        </div>
+
+        <form class="login-form" onsubmit="handleLogin(event)">
+          <input
+            type="text"
+            id="login-username"
+            class="login-input"
+            placeholder="Username"
+            required
+          />
+          <input
+            type="password"
+            id="login-password"
+            class="login-input"
+            placeholder="Password"
+            required
+          />
+          <button type="submit" class="login-button">🔐 Login</button>
+        </form>
+
+        <div id="login-error" class="login-error" style="display: none"></div>
+      </div>
+    </div>
+
+    <!-- メインコンソール -->
+    <div id="main-console" class="main-console">
+      <div class="header">
+        <div class="user-info">
+          <span id="user-display"
+            >👤 Welcome, <span id="username-display"></span> (<span
+              id="role-display"
+            ></span
+            >)</span
+          >
+        </div>
+        <h1>&#128640; Pilgrimage Web Console</h1>
+        <p>Comprehensive Management Interface for Distributed Message Broker</p>
+        <button class="logout-button" onclick="handleLogout()">
+          🚪 Logout
+        </button>
+      </div>
+
+      <div class="container">
+        <div class="info-panel">
+          <strong>System Status:</strong>
+          <span class="status-indicator status-online"></span>Online |
+          <strong>Active Brokers:</strong> <span id="active-brokers">0</span> |
+          <strong>Total Messages:</strong> <span id="total-messages">0</span>
+        </div>
+
+        <div class="tabs">
+          <button class="tab active" onclick="showTab('broker-management')">
+            &#127970; Broker Management
+          </button>
+          <button class="tab" onclick="showTab('messaging')">
+            &#128232; Messaging
+          </button>
+          <button class="tab" onclick="showTab('security')">
+            &#128274; Security
+          </button>
+          <button class="tab" onclick="showTab('monitoring')">
+            &#128202; Monitoring
+          </button>
+          <button class="tab" onclick="showTab('cluster')">
+            &#127760; Cluster
+          </button>
+        </div>
+
+        <div id="broker-management" class="tab-content active">
+          <div class="grid">
+            <div class="endpoint">
+              <h3>&#128640; Start New Broker</h3>
+              <div class="form-group">
+                <label>Broker ID:</label>
+                <input
+                  type="text"
+                  id="broker-id"
+                  placeholder="Enter broker ID"
+                  value="default-broker"
+                />
+              </div>
+              <div class="form-group">
+                <label>Partitions:</label>
+                <input
+                  type="number"
+                  id="partitions"
+                  placeholder="Number of partitions"
+                  value="3"
+                  min="1"
+                  max="32"
+                />
+              </div>
+              <div class="form-group">
+                <label>Replication:</label>
+                <input
+                  type="number"
+                  id="replication"
+                  placeholder="Replication factor"
+                  value="2"
+                  min="1"
+                  max="5"
+                />
+              </div>
+              <div class="form-group">
+                <label>Storage Path:</label>
+                <input
+                  type="text"
+                  id="storage-path"
+                  placeholder="Storage directory path"
+                  value="./storage/default"
+                />
+              </div>
+              <button onclick="startBroker()">&#128640; Start Broker</button>
+              <div id="start-result" class="result"></div>
+            </div>
+
+            <div class="endpoint">
+              <h3>&#128202; Broker Status & Control</h3>
+              <div class="form-group">
+                <label>Broker ID:</label>
+                <input
+                  type="text"
+                  id="status-broker-id"
+                  placeholder="Broker ID to check"
+                  value="default-broker"
+                />
+              </div>
+              <button onclick="checkStatus()">&#128202; Check Status</button>
+              <button class="danger" onclick="stopBroker()">
+                &#9209; Stop Broker
+              </button>
+              <div id="status-result" class="result"></div>
+              <div id="stop-result" class="result"></div>
+            </div>
+          </div>
+        </div>
+
+        <div id="messaging" class="tab-content">
+          <div class="grid">
+            <div class="endpoint">
+              <h3>&#128228; Send Message</h3>
+              <div class="form-group">
+                <label>Broker ID:</label>
+                <input
+                  type="text"
+                  id="send-broker-id"
+                  placeholder="Target broker ID"
+                  value="default-broker"
+                />
+              </div>
+              <div class="form-group">
+                <label>Topic:</label>
+                <input
+                  type="text"
+                  id="topic"
+                  placeholder="Message topic"
+                  value="default_topic"
+                />
+              </div>
+              <div class="form-group">
+                <label>Message:</label>
+                <textarea
+                  id="message"
+                  placeholder="Enter your message content here..."
+                  rows="4"
+                >
+Hello from Pilgrimage Web Console!</textarea
+                >
+              </div>
+              <div class="form-group">
+                <label>Schema (Optional):</label>
+                <textarea
+                  id="schema"
+                  placeholder="JSON schema definition (optional)"
+                  rows="2"
+                ></textarea>
+              </div>
+              <button onclick="sendMessage()">&#128228; Send Message</button>
+              <div id="send-result" class="result"></div>
+            </div>
+
+            <div class="endpoint">
+              <h3>&#128229; Consume Messages</h3>
+              <div class="form-group">
+                <label>Broker ID:</label>
+                <input
+                  type="text"
+                  id="consume-broker-id"
+                  placeholder="Source broker ID"
+                  value="default-broker"
+                />
+              </div>
+              <div class="form-group">
+                <label>Topic:</label>
+                <input
+                  type="text"
+                  id="consume-topic"
+                  placeholder="Topic to consume from"
+                  value="default_topic"
+                />
+              </div>
+              <div class="form-group">
+                <label>Consumer Group:</label>
+                <input
+                  type="text"
+                  id="consumer-group"
+                  placeholder="Consumer group ID (optional)"
+                />
+              </div>
+              <button onclick="consumeMessages()">
+                &#128229; Consume Messages
+              </button>
+              <button class="secondary" onclick="subscribeToTopic()">
+                🔔 Subscribe (Live)
+              </button>
+              <div id="consume-result" class="result"></div>
+            </div>
+          </div>
+        </div>
+
+        <div id="security" class="tab-content">
+          <div class="grid">
+            <div class="endpoint">
+              <h3>&#128737; Security Status</h3>
+              <button onclick="getSecurityStatus()">
+                &#128737; Get Security Status
+              </button>
+              <button class="secondary" onclick="getAuditLogs()">
+                &#128203; View Audit Logs
+              </button>
+              <div id="security-result" class="result"></div>
+            </div>
+
+            <div class="endpoint">
+              <h3>&#128101; Role Management</h3>
+              <div class="form-group">
+                <label>User ID:</label>
+                <input type="text" id="role-user-id" placeholder="User ID" />
+              </div>
+              <div class="form-group">
+                <label>Role:</label>
+                <select id="role-name">
+                  <option value="admin">Admin</option>
+                  <option value="user">User</option>
+                  <option value="viewer">Viewer</option>
+                </select>
+              </div>
+              <button onclick="assignRole()">&#128101; Assign Role</button>
+              <div id="role-result" class="result"></div>
+            </div>
+          </div>
+        </div>
+
+        <div id="monitoring" class="tab-content">
+          <div class="grid">
+            <div class="endpoint">
+              <h3>&#128200; System Metrics</h3>
+              <button onclick="getMetrics()">
+                &#128200; Get Prometheus Metrics
+              </button>
+              <button class="secondary" onclick="refreshMetrics()">
+                &#128257; Auto-Refresh
+              </button>
+              <div id="metrics-result" class="result"></div>
+            </div>
+
+            <div class="endpoint">
+              <h3>&#128202; Dashboard Data</h3>
+              <button onclick="getDashboardData()">
+                &#128202; Get Dashboard Data
+              </button>
+              <button class="secondary" onclick="exportMetrics()">
+                &#128229; Export Data
+              </button>
+              <div id="dashboard-result" class="result"></div>
+            </div>
+
+            <div class="endpoint">
+              <h3>&#9889; Performance Monitor</h3>
+              <div class="form-group">
+                <label>Refresh Rate:</label>
+                <select id="refresh-rate">
+                  <option value="5000">5 seconds</option>
+                  <option value="10000" selected>10 seconds</option>
+                  <option value="30000">30 seconds</option>
+                </select>
+              </div>
+              <button onclick="startPerformanceMonitor()">
+                &#9889; Start Monitor
+              </button>
+              <button class="danger" onclick="stopPerformanceMonitor()">
+                &#9209; Stop Monitor
+              </button>
+              <div id="performance-result" class="result"></div>
+            </div>
+          </div>
+        </div>
+
+        <div id="cluster" class="tab-content">
+          <div class="grid">
+            <div class="endpoint">
+              <h3>&#127760; Cluster Health</h3>
+              <button onclick="getClusterHealth()">
+                &#127760; Get Cluster Health
+              </button>
+              <button class="secondary" onclick="getTopicDetails()">
+                &#128203; Topic Details
+              </button>
+              <div id="cluster-result" class="result"></div>
+            </div>
+
+            <div class="endpoint">
+              <h3>&#128295; Cluster Configuration</h3>
+              <div class="form-group">
+                <label>Node Count:</label>
+                <input
+                  type="number"
+                  id="node-count"
+                  value="3"
+                  min="1"
+                  max="10"
+                />
+              </div>
+              <div class="form-group">
+                <label>Auto-Scaling:</label>
+                <select id="auto-scaling">
+                  <option value="enabled">Enabled</option>
+                  <option value="disabled">Disabled</option>
+                </select>
+              </div>
+              <button onclick="updateClusterConfig()">
+                &#128295; Update Configuration
+              </button>
+              <div id="cluster-config-result" class="result"></div>
+            </div>
+
+            <div class="endpoint">
+              <h3>&#128257; Cluster Operations</h3>
+              <button onclick="rebalanceCluster()">
+                &#128257; Rebalance Cluster
+              </button>
+              <button class="secondary" onclick="backupCluster()">
+                &#128190; Backup Data
+              </button>
+              <button class="danger" onclick="resetCluster()">
+                &#128465; Reset Cluster
+              </button>
+              <div id="cluster-ops-result" class="result"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <!-- main-console終了 -->
+    </div>
+    <!-- container終了 -->
+
+    <script>
+      let performanceMonitorInterval = null;
+      let isMonitoring = false;
+      let websocket = null;
+      let isSubscribed = false;
+
+      // Tab management
+      function showTab(tabId) {
+        // Hide all tab contents
+        const contents = document.querySelectorAll(".tab-content");
+        contents.forEach((content) => content.classList.remove("active"));
+
+        // Remove active class from all tabs
+        const tabs = document.querySelectorAll(".tab");
+        tabs.forEach((tab) => tab.classList.remove("active"));
+
+        // Show selected tab content
+        document.getElementById(tabId).classList.add("active");
+
+        // Add active class to clicked tab
+        event.target.classList.add("active");
+      }
+
+      // Utility functions
+      async function makeRequest(url, method = "GET", body = null) {
+        try {
+          const options = {
+            method,
+            headers: {
+              "Content-Type": "application/json",
+            },
+          };
+          if (body) {
+            options.body = JSON.stringify(body);
+          }
+
+          const response = await fetch(url, options);
+          const text = await response.text();
+          return { status: response.status, body: text, ok: response.ok };
+        } catch (error) {
+          return { status: "Error", body: error.message, ok: false };
+        }
+      }
+
+      function updateResult(elementId, result) {
+        const element = document.getElementById(elementId);
+        if (element) {
+          element.className = result.ok ? "result" : "result error";
+          element.innerHTML = `Status: ${result.status}\nResponse: ${result.body}`;
+        }
+      }
+
+      function formatJSON(str) {
+        try {
+          return JSON.stringify(JSON.parse(str), null, 2);
+        } catch {
+          return str;
+        }
+      }
+
+      // Broker Management Functions
+      async function startBroker() {
+        const result = await makeRequest("/start", "POST", {
+          id: document.getElementById("broker-id").value,
+          partitions: parseInt(document.getElementById("partitions").value),
+          replication: parseInt(document.getElementById("replication").value),
+          storage: document.getElementById("storage-path").value,
+        });
+        updateResult("start-result", {
+          ...result,
+          body: formatJSON(result.body),
+        });
+        updateSystemStatus();
+      }
+
+      async function checkStatus() {
+        const result = await makeRequest("/status", "POST", {
+          id: document.getElementById("status-broker-id").value,
+        });
+        updateResult("status-result", {
+          ...result,
+          body: formatJSON(result.body),
+        });
+      }
+
+      async function stopBroker() {
+        const result = await makeRequest("/stop", "POST", {
+          id: document.getElementById("status-broker-id").value,
+        });
+        updateResult("stop-result", {
+          ...result,
+          body: formatJSON(result.body),
+        });
+        updateSystemStatus();
+      }
+
+      // Messaging Functions
+      async function sendMessage() {
+        const payload = {
+          id: document.getElementById("send-broker-id").value,
+          topic: document.getElementById("topic").value,
+          message: document.getElementById("message").value,
+        };
+
+        const schema = document.getElementById("schema").value.trim();
+        if (schema) {
+          payload.schema = schema;
+        }
+
+        const result = await makeRequest("/send", "POST", payload);
+        updateResult("send-result", {
+          ...result,
+          body: formatJSON(result.body),
+        });
+        updateSystemStatus();
+      }
+
+      async function consumeMessages() {
+        const payload = {
+          id: document.getElementById("consume-broker-id").value,
+          topic: document.getElementById("consume-topic").value,
+        };
+
+        const consumerGroup = document
+          .getElementById("consumer-group")
+          .value.trim();
+        if (consumerGroup) {
+          payload.group_id = consumerGroup;
+        }
+
+        const result = await makeRequest("/consume", "POST", payload);
+        updateResult("consume-result", {
+          ...result,
+          body: formatJSON(result.body),
+        });
+
+        // Update system status after consuming messages
+        if (result.ok) {
+          updateSystemStatus();
+        }
+      }
+
+      async function subscribeToTopic() {
+        const brokerId = document.getElementById("consume-broker-id").value;
+        const topic = document.getElementById("consume-topic").value;
+
+        if (isSubscribed) {
+          // Stop current subscription
+          if (websocket) {
+            websocket.close();
+            websocket = null;
+          }
+          if (pollingInterval) {
+            stopPollingSubscription();
+          }
+          return;
+        }
+
+        try {
+          // Create WebSocket connection for live subscription
+          const wsProtocol =
+            window.location.protocol === "https:" ? "wss:" : "ws:";
+          const wsUrl = `${wsProtocol}//${window.location.host}/ws/subscribe/${brokerId}/${topic}`;
+
+          websocket = new WebSocket(wsUrl);
+
+          websocket.onopen = function (event) {
+            isSubscribed = true;
+            updateResult("consume-result", {
+              status: "Connected",
+              body: `Live subscription established for topic: ${topic}\nBroker: ${brokerId}\nWaiting for messages...`,
+              ok: true,
+            });
+            document.querySelector(
+              'button[onclick="subscribeToTopic()"]'
+            ).textContent = "⏹️ Disconnect";
+          };
+
+          websocket.onmessage = function (event) {
+            const timestamp = new Date().toLocaleTimeString();
+            const currentResult = document.getElementById("consume-result");
+            const newMessage = `[${timestamp}] New message: ${event.data}`;
+
+            // Append new message to existing content
+            if (
+              currentResult.innerHTML.includes(
+                "Live subscription established"
+              ) ||
+              currentResult.innerHTML.includes("Polling subscription started")
+            ) {
+              currentResult.innerHTML += "\n" + newMessage;
+            } else {
+              updateResult("consume-result", {
+                status: "Live Message",
+                body: newMessage,
+                ok: true,
+              });
+            }
+
+            // Update system status when new messages arrive
+            updateSystemStatus();
+          };
+
+          websocket.onclose = function (event) {
+            isSubscribed = false;
+            websocket = null;
+            const reason = event.wasClean
+              ? "Connection closed cleanly"
+              : "Connection lost";
+            updateResult("consume-result", {
+              status: "Disconnected",
+              body: `Live subscription ended: ${reason}`,
+              ok: true,
+            });
+            document.querySelector(
+              'button[onclick="subscribeToTopic()"]'
+            ).textContent = "🔔 Subscribe (Live)";
+          };
+
+          websocket.onerror = function (error) {
+            console.error("WebSocket error:", error);
+            websocket = null;
+            updateResult("consume-result", {
+              status: "WebSocket Failed",
+              body: "WebSocket connection failed. Starting polling mode...",
+              ok: false,
+            });
+
+            // Fallback to polling subscription
+            setTimeout(() => startPollingSubscription(brokerId, topic), 1000);
+          };
+        } catch (error) {
+          console.error("Failed to create WebSocket:", error);
+          // Fallback to polling method
+          startPollingSubscription(brokerId, topic);
+        }
+      }
+
+      // Fallback polling subscription method
+      let pollingInterval = null;
+
+      function startPollingSubscription(brokerId, topic) {
+        if (pollingInterval) {
+          clearInterval(pollingInterval);
+        }
+
+        isSubscribed = true;
+        updateResult("consume-result", {
+          status: "Polling Mode",
+          body: `Polling subscription started for topic: ${topic}\nBroker: ${brokerId}\nChecking for messages every 1.5 seconds...`,
+          ok: true,
+        });
+
+        document.querySelector(
+          'button[onclick="subscribeToTopic()"]'
+        ).textContent = "⏹️ Stop Polling";
+
+        pollingInterval = setInterval(async () => {
+          try {
+            const result = await makeRequest("/consume", "POST", {
+              id: brokerId,
+              topic: topic,
+            });
+
+            if (
+              result.ok &&
+              result.body !== '"No messages available"' &&
+              !result.body.includes("No messages available")
+            ) {
+              const timestamp = new Date().toLocaleTimeString();
+              const currentResult = document.getElementById("consume-result");
+              const newMessage = `[${timestamp}] Polled message: ${result.body.replace(
+                /"/g,
+                ""
+              )}`;
+
+              // Append new message to existing content
+              if (
+                currentResult.innerHTML.includes("Polling subscription started")
+              ) {
+                currentResult.innerHTML += "\n" + newMessage;
+              } else {
+                updateResult("consume-result", {
+                  status: "Polling Message",
+                  body: newMessage,
+                  ok: true,
+                });
+              }
+
+              // Update system status when new messages arrive
+              updateSystemStatus();
+            }
+          } catch (error) {
+            console.error("Polling error:", error);
+          }
+        }, 1500);
+      }
+
+      function stopPollingSubscription() {
+        if (pollingInterval) {
+          clearInterval(pollingInterval);
+          pollingInterval = null;
+        }
+        isSubscribed = false;
+        updateResult("consume-result", {
+          status: "Stopped",
+          body: "Polling subscription stopped",
+          ok: true,
+        });
+        document.querySelector(
+          'button[onclick="subscribeToTopic()"]'
+        ).textContent = "🔔 Subscribe (Live)";
+      }
+
+      // Security Functions
+      async function getSecurityStatus() {
+        const result = await makeRequest("/security/status");
+        updateResult("security-result", {
+          ...result,
+          body: formatJSON(result.body),
+        });
+      }
+
+      async function getAuditLogs() {
+        // Placeholder for audit log functionality
+        updateResult("security-result", {
+          status: "Info",
+          body: "Audit log functionality would be implemented here",
+          ok: true,
+        });
+      }
+
+      async function assignRole() {
+        const result = await makeRequest("/security/assign-role", "POST", {
+          user_id: document.getElementById("role-user-id").value,
+          role: document.getElementById("role-name").value,
+        });
+        updateResult("role-result", {
+          ...result,
+          body: formatJSON(result.body),
+        });
+      }
+
+      // Monitoring Functions
+      async function getMetrics() {
+        const result = await makeRequest("/metrics");
+        updateResult("metrics-result", result);
+      }
+
+      async function getDashboardData() {
+        const result = await makeRequest("/api/dashboard");
+        updateResult("dashboard-result", {
+          ...result,
+          body: formatJSON(result.body),
+        });
+      }
+
+      async function refreshMetrics() {
+        await getMetrics();
+        await getDashboardData();
+      }
+
+      async function exportMetrics() {
+        const result = await makeRequest("/api/dashboard");
+        if (result.ok) {
+          const blob = new Blob([result.body], { type: "application/json" });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = `pilgrimage-metrics-${new Date().toISOString()}.json`;
+          a.click();
+          URL.revokeObjectURL(url);
+        }
+      }
+
+      function startPerformanceMonitor() {
+        if (isMonitoring) return;
+
+        isMonitoring = true;
+        const interval = parseInt(
+          document.getElementById("refresh-rate").value
+        );
+
+        performanceMonitorInterval = setInterval(async () => {
+          const result = await makeRequest("/api/dashboard");
+          if (result.ok) {
+            const timestamp = new Date().toLocaleTimeString();
+            updateResult("performance-result", {
+              ...result,
+              body: `[${timestamp}] Performance Update:\n${formatJSON(
+                result.body
+              )}`,
+              ok: true,
+            });
+          }
+        }, interval);
+
+        updateResult("performance-result", {
+          status: "Info",
+          body: `Performance monitoring started (${
+            interval / 1000
+          }s intervals)`,
+          ok: true,
+        });
+      }
+
+      function stopPerformanceMonitor() {
+        if (performanceMonitorInterval) {
+          clearInterval(performanceMonitorInterval);
+          performanceMonitorInterval = null;
+          isMonitoring = false;
+
+          updateResult("performance-result", {
+            status: "Info",
+            body: "Performance monitoring stopped",
+            ok: true,
+          });
+        }
+      }
+
+      // Cluster Functions
+      async function getClusterHealth() {
+        const result = await makeRequest("/api/cluster-health");
+        updateResult("cluster-result", {
+          ...result,
+          body: formatJSON(result.body),
+        });
+      }
+
+      async function getTopicDetails() {
+        const result = await makeRequest("/api/topic-details");
+        updateResult("cluster-result", {
+          ...result,
+          body: formatJSON(result.body),
+        });
+      }
+
+      async function updateClusterConfig() {
+        // Placeholder for cluster configuration update
+        updateResult("cluster-config-result", {
+          status: "Info",
+          body: "Cluster configuration update functionality would be implemented here",
+          ok: true,
+        });
+      }
+
+      async function rebalanceCluster() {
+        updateResult("cluster-ops-result", {
+          status: "Info",
+          body: "Cluster rebalancing initiated...",
+          ok: true,
+        });
+      }
+
+      async function backupCluster() {
+        updateResult("cluster-ops-result", {
+          status: "Info",
+          body: "Cluster backup functionality would be implemented here",
+          ok: true,
+        });
+      }
+
+      async function resetCluster() {
+        if (
+          confirm(
+            "Are you sure you want to reset the entire cluster? This action cannot be undone."
+          )
+        ) {
+          updateResult("cluster-ops-result", {
+            status: "Warning",
+            body: "Cluster reset functionality would be implemented here",
+            ok: true,
+          });
+        }
+      }
+
+      // System Status Updates
+      async function updateSystemStatus() {
+        try {
+          const dashboardResult = await makeRequest("/api/dashboard");
+          if (dashboardResult.ok) {
+            const data = JSON.parse(dashboardResult.body);
+            document.getElementById("active-brokers").textContent =
+              data.cluster_health?.active_brokers || 0;
+            document.getElementById("total-messages").textContent =
+              data.cluster_health?.total_messages || 0;
+          }
+        } catch (error) {
+          console.error("Failed to update system status:", error);
+        }
+      }
+
+      // Initialize on page load
+      document.addEventListener("DOMContentLoaded", function () {
+        updateSystemStatus();
+
+        // Auto-refresh system status every 10 seconds for better responsiveness
+        setInterval(updateSystemStatus, 10000);
+
+        // Cleanup on page unload
+        window.addEventListener("beforeunload", function () {
+          if (websocket) {
+            websocket.close();
+          }
+          if (pollingInterval) {
+            clearInterval(pollingInterval);
+          }
+          if (performanceMonitorInterval) {
+            clearInterval(performanceMonitorInterval);
+          }
+        });
+      });
+
+      // ===== セッション管理と認証 =====
+      let authToken = null;
+      let currentUser = null;
+      let userRole = null;
+
+      // ページ読み込み時にセッション確認
+      document.addEventListener("DOMContentLoaded", function () {
+        checkSession();
+      });
+
+      function checkSession() {
+        authToken = localStorage.getItem("authToken");
+        currentUser = localStorage.getItem("currentUser");
+        userRole = localStorage.getItem("userRole");
+
+        if (authToken && currentUser && userRole) {
+          showMainConsole();
+        } else {
+          showLoginScreen();
+        }
+      }
+
+      function showLoginScreen() {
+        document.getElementById("login-screen").style.display = "flex";
+        document.getElementById("main-console").style.display = "none";
+      }
+
+      function showMainConsole() {
+        document.getElementById("login-screen").style.display = "none";
+        document.getElementById("main-console").style.display = "block";
+        document.getElementById("username-display").textContent = currentUser;
+        document.getElementById("role-display").textContent = userRole;
+
+        // システムステータスを更新
+        updateSystemStatus();
+      }
+
+      async function handleLogin(event) {
+        event.preventDefault();
+
+        const username = document.getElementById("login-username").value.trim();
+        const password = document.getElementById("login-password").value.trim();
+        const errorDiv = document.getElementById("login-error");
+
+        if (!username || !password) {
+          showLoginError("Username and password are required");
+          return;
+        }
+
+        try {
+          const result = await makeRequest("/security/login", "POST", {
+            username: username,
+            password: password,
+          });
+
+          if (result.ok && result.status === 200) {
+            const response = JSON.parse(result.body);
+
+            // セッション情報を保存
+            authToken = response.token;
+            currentUser = username;
+            userRole = response.role;
+
+            localStorage.setItem("authToken", authToken);
+            localStorage.setItem("currentUser", currentUser);
+            localStorage.setItem("userRole", userRole);
+
+            // メインコンソールを表示
+            showMainConsole();
+
+            // ログインフォームをリセット
+            document.getElementById("login-username").value = "";
+            document.getElementById("login-password").value = "";
+            errorDiv.style.display = "none";
+          } else {
+            showLoginError(result.body || "Login failed");
+          }
+        } catch (error) {
+          showLoginError("Network error: " + error.message);
+        }
+      }
+
+      function showLoginError(message) {
+        const errorDiv = document.getElementById("login-error");
+        errorDiv.textContent = message;
+        errorDiv.style.display = "block";
+      }
+
+      function handleLogout() {
+        // セッション情報をクリア
+        authToken = null;
+        currentUser = null;
+        userRole = null;
+
+        localStorage.removeItem("authToken");
+        localStorage.removeItem("currentUser");
+        localStorage.removeItem("userRole");
+
+        // ログイン画面を表示
+        showLoginScreen();
+      }
+
+      // 認証が必要な全ての関数を保護するラッパー
+      function requireAuth(func) {
+        return function (...args) {
+          if (!authToken || !currentUser) {
+            showLoginError("Please login first");
+            showLoginScreen();
+            return;
+          }
+          return func.apply(this, args);
+        };
+      }
+
+      // 既存の関数を認証必須にラップ
+      const originalStartBroker = startBroker;
+      const originalStopBroker = stopBroker;
+      const originalCheckStatus = checkStatus;
+      const originalSendMessage = sendMessage;
+      const originalConsumeMessages = consumeMessages;
+      const originalSubscribeToTopic = subscribeToTopic;
+      const originalGetMetrics = getMetrics;
+      const originalGetDashboardData = getDashboardData;
+      const originalGetClusterHealth = getClusterHealth;
+
+      startBroker = requireAuth(originalStartBroker);
+      stopBroker = requireAuth(originalStopBroker);
+      checkStatus = requireAuth(originalCheckStatus);
+      sendMessage = requireAuth(originalSendMessage);
+      consumeMessages = requireAuth(originalConsumeMessages);
+      subscribeToTopic = requireAuth(originalSubscribeToTopic);
+      getMetrics = requireAuth(originalGetMetrics);
+      getDashboardData = requireAuth(originalGetDashboardData);
+      getClusterHealth = requireAuth(originalGetClusterHealth);
+    </script>
+  </body>
+</html>

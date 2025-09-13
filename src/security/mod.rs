@@ -109,7 +109,6 @@ impl SecurityManager {
             config,
         };
 
-        println!("✅ Security manager initialized with comprehensive security features");
         Ok(manager)
     }
 

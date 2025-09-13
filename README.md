@@ -863,7 +863,15 @@ pilgrimage start --id <BROKER_ID> --partitions <COUNT> --replication <FACTOR> --
 **Example:**
 
 ```bash
-pilgrimage start --id prod-broker-1 --partitions 8 --replication 3 --storage /data/broker1
+```bash
+# Start production broker with local storage
+pilgrimage start --id prod-broker-1 --partitions 8 --replication 3 --storage ./storage/broker1
+
+# Start with user directory storage
+pilgrimage start --id prod-broker-1 --partitions 8 --replication 3 --storage ~/pilgrimage-data/broker1
+
+# Start with temporary storage for testing
+pilgrimage start --id test-broker-1 --partitions 4 --replication 2 --storage /tmp/pilgrimage/test
 ```
 
 #### `send` - Send Message

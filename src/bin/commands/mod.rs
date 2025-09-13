@@ -4,6 +4,7 @@ pub mod send;
 pub mod start;
 pub mod status;
 pub mod stop;
+pub mod web;
 
 // New command modules
 pub mod topic;
@@ -19,6 +20,7 @@ pub use send::handle_send_command;
 pub use start::handle_start_command;
 pub use status::handle_status_command;
 pub use stop::handle_stop_command;
+pub use web::handle_web_command;
 
 // Export new command handlers
 pub use topic::{handle_topic_create_command, handle_topic_list_command, handle_topic_delete_command, handle_topic_describe_command};

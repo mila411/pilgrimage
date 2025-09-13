@@ -309,6 +309,32 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         .value_name("SECONDS"),
                 ),
         )
+        // Web Console command
+        .subcommand(
+            Command::new("web")
+                .about("Start the web console and dashboard")
+                .arg(
+                    Arg::new("bind")
+                        .short('b')
+                        .long("bind")
+                        .value_name("ADDRESS")
+                        .help("Address to bind the web server to")
+                        .default_value("127.0.0.1:8080"),
+                )
+                .arg(
+                    Arg::new("dashboard")
+                        .short('d')
+                        .long("dashboard")
+                        .help("Enable dashboard interface")
+                        .action(clap::ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("api-only")
+                        .long("api-only")
+                        .help("Start API endpoints only (no dashboard)")
+                        .action(clap::ArgAction::SetTrue),
+                ),
+        )
         // Topic management
         .subcommand(
             Command::new("topic")
@@ -740,6 +766,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         Some(("send", sub_matches)) => handle_send_command(sub_matches).await,
         Some(("consume", sub_matches)) => handle_consume_command(sub_matches).await,
         Some(("status", sub_matches)) => handle_status_command(sub_matches).await,
+        Some(("web", sub_matches)) => handle_web_command(sub_matches).await,
 
         Some(("topic", sub_matches)) => match sub_matches.subcommand() {
             Some(("create", create_matches)) => handle_topic_create_command(create_matches)

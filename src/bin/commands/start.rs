@@ -80,9 +80,21 @@ fn validate_args(matches: &ArgMatches) -> CliResult<(String, usize, usize, Strin
     // Check if storage path exists and create it
     if !std::path::Path::new(storage).exists() {
         if let Err(e) = std::fs::create_dir_all(storage) {
-            return Err(CliError::IoError(e));
+            return Err(CliError::BrokerError {
+                kind: BrokerErrorKind::OperationFailed,
+                message: format!(
+                    "Failed to create storage directory '{}': {}\n\nSuggestions:\n\
+                    1. Use a local directory: --storage ./storage/broker1\n\
+                    2. Use your home directory: --storage ~/pilgrimage-data/broker1\n\
+                    3. Use temporary directory: --storage /tmp/pilgrimage/broker1\n\
+                    4. Check directory permissions if using system paths",
+                    storage, e
+                ),
+            });
         }
-        println!("Created storage directory: {}", storage);
+        println!("✅ Created storage directory: {}", storage);
+    } else {
+        println!("📁 Using existing storage directory: {}", storage);
     }
 
     Ok((id.to_string(), partitions, replication, storage.to_string()))
@@ -92,17 +104,24 @@ pub async fn handle_start_command(matches: &ArgMatches) -> CliResult<()> {
     let (id, partitions, replication, storage) = validate_args(matches)?;
 
     println!(
-        "Starting broker {}... Number of partitions: {}, Replication factor: {}, Storage path: {}",
+        "🚀 Starting broker {}... Number of partitions: {}, Replication factor: {}, Storage path: {}",
         id, partitions, replication, storage
     );
 
     // Initialize the broker
-    let broker = Broker::new(&id, partitions, replication, &storage).map_err(|e| {
-        Box::new(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            format!("Failed to initialize broker: {}", e),
-        )) as Box<dyn std::error::Error>
-    })?;
+    let broker =
+        Broker::new(&id, partitions, replication, &storage).map_err(|e| CliError::BrokerError {
+            kind: BrokerErrorKind::OperationFailed,
+            message: format!(
+                "Failed to initialize broker '{}': {}\n\nThis may be caused by:\n\
+                1. Insufficient permissions to write to storage directory\n\
+                2. Storage directory is on a read-only filesystem\n\
+                3. Disk space is insufficient\n\
+                4. Storage path contains invalid characters\n\n\
+                Try using a different storage path with --storage option",
+                id, e
+            ),
+        })?;
     let _broker = Arc::new(Mutex::new(broker));
 
     // Create PID file for the broker process
@@ -139,6 +158,16 @@ pub async fn handle_start_command(matches: &ArgMatches) -> CliResult<()> {
         });
     }
 
-    println!("Broker {} started successfully", id);
+    println!("✅ Broker '{}' started successfully!", id);
+    println!("📁 Storage location: {}", storage);
+    println!(
+        "🔧 Configuration: {} partitions, {} replication factor",
+        partitions, replication
+    );
+    println!("📋 PID file: {}", pid_file);
+    println!(
+        "\nBroker is running. Use 'pilgrimage status --id {}' to check status.",
+        id
+    );
     Ok(())
 }
