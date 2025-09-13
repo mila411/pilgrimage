@@ -4,7 +4,7 @@ use log::{error, info};
 pub struct LoginArgs {
     /// Username for authentication
     pub username: Option<String>,
-    
+
     /// Interactive login (prompts for credentials)
     pub interactive: bool,
 }

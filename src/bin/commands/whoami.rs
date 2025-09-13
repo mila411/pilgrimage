@@ -12,7 +12,7 @@ pub fn handle_whoami_command(args: WhoamiArgs) -> Result<(), Box<dyn std::error:
     match auth_manager.get_current_session() {
         Ok(session) => {
             println!("👤 Current User: {}", session.username);
-            
+
             if args.detailed {
                 println!();
                 println!("📋 Session Details:");
@@ -21,13 +21,13 @@ pub fn handle_whoami_command(args: WhoamiArgs) -> Result<(), Box<dyn std::error:
                 println!("  Created: {}", format_timestamp(session.created_at));
                 println!("  Last Accessed: {}", format_timestamp(session.last_accessed));
                 println!("  Expires: {}", format_timestamp(session.expires_at));
-                
+
                 // Calculate time until expiry
                 let current_time = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap()
                     .as_secs();
-                
+
                 if session.expires_at > current_time {
                     let remaining = session.expires_at - current_time;
                     println!("  Time Remaining: {}", format_duration(remaining));
@@ -72,7 +72,7 @@ fn format_duration(seconds: u64) -> String {
     let hours = seconds / 3600;
     let minutes = (seconds % 3600) / 60;
     let secs = seconds % 60;
-    
+
     if hours > 0 {
         format!("{}h {}m {}s", hours, minutes, secs)
     } else if minutes > 0 {

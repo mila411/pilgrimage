@@ -1079,8 +1079,6 @@ mod tests {
     use std::fs;
     use std::path::Path;
 
-    // 簡易版 create_test_app は削除。下の包括版を使用します。
-
     // Helper function to cleanup test directories
     fn cleanup_test_dir(dir: &str) {
         if Path::new(dir).exists() {

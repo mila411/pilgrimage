@@ -15,7 +15,7 @@ pub fn handle_logout_command(args: LogoutArgs) -> Result<(), Box<dyn std::error:
             Ok(session) => {
                 println!("Current session: {}", session.username);
                 print!("Are you sure you want to logout? (y/N): ");
-                
+
                 let mut input = String::new();
                 std::io::stdin().read_line(&mut input)
                     .map_err(|e| format!("Failed to read input: {}", e))?;

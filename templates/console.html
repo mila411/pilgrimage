@@ -1178,12 +1178,12 @@ Hello from Pilgrimage Web Console!</textarea
         });
       });
 
-      // ===== セッション管理と認証 =====
+      // ===== Session Management and Authentication =====
       let authToken = null;
       let currentUser = null;
       let userRole = null;
 
-      // ページ読み込み時にセッション確認
+      // Check session on page load
       document.addEventListener("DOMContentLoaded", function () {
         checkSession();
       });
@@ -1211,7 +1211,7 @@ Hello from Pilgrimage Web Console!</textarea
         document.getElementById("username-display").textContent = currentUser;
         document.getElementById("role-display").textContent = userRole;
 
-        // システムステータスを更新
+        // Update system status
         updateSystemStatus();
       }
 
@@ -1236,7 +1236,7 @@ Hello from Pilgrimage Web Console!</textarea
           if (result.ok && result.status === 200) {
             const response = JSON.parse(result.body);
 
-            // セッション情報を保存
+            // Save session information
             authToken = response.token;
             currentUser = username;
             userRole = response.role;
@@ -1245,10 +1245,10 @@ Hello from Pilgrimage Web Console!</textarea
             localStorage.setItem("currentUser", currentUser);
             localStorage.setItem("userRole", userRole);
 
-            // メインコンソールを表示
+            // Display the main console
             showMainConsole();
 
-            // ログインフォームをリセット
+            // Reset the login form
             document.getElementById("login-username").value = "";
             document.getElementById("login-password").value = "";
             errorDiv.style.display = "none";
@@ -1267,7 +1267,7 @@ Hello from Pilgrimage Web Console!</textarea
       }
 
       function handleLogout() {
-        // セッション情報をクリア
+        // Clear session information
         authToken = null;
         currentUser = null;
         userRole = null;
@@ -1276,11 +1276,11 @@ Hello from Pilgrimage Web Console!</textarea
         localStorage.removeItem("currentUser");
         localStorage.removeItem("userRole");
 
-        // ログイン画面を表示
+        // Show login screen
         showLoginScreen();
       }
 
-      // 認証が必要な全ての関数を保護するラッパー
+      // Wrapper to protect all functions that require authentication
       function requireAuth(func) {
         return function (...args) {
           if (!authToken || !currentUser) {
@@ -1292,7 +1292,7 @@ Hello from Pilgrimage Web Console!</textarea
         };
       }
 
-      // 既存の関数を認証必須にラップ
+      // Wrap existing functions to require authentication
       const originalStartBroker = startBroker;
       const originalStopBroker = stopBroker;
       const originalCheckStatus = checkStatus;
