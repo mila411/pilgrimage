@@ -1,0 +1,19 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "cargo-check-pilgrimage",
+			"type": "shell",
+			"command": "cargo",
+			"args": [
+				"check",
+				"--bin",
+				"pilgrimage"
+			],
+			"problemMatcher": [
+				"$rustc"
+			],
+			"group": "build"
+		}
+	]
+}

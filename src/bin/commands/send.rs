@@ -42,12 +42,12 @@ fn handle_schema(
 ) -> CliResult<MessageSchema> {
     if let Some(schema_path) = schema_file {
         let schema_content =
-            std::fs::read_to_string(schema_path).map_err(|e| CliError::IoError(e))?;
+            std::fs::read_to_string(schema_path).map_err(|e| CliError::IoError(e.to_string()))?;
 
         let schema = registry
             .register_schema(topic, &schema_content)
             .map_err(|e| CliError::SchemaError {
-                kind: SchemaErrorKind::RegistryError,
+                kind: SchemaErrorKind::RegistrationError,
                 message: format!("Schema registration error: {}", e),
             })?;
 
@@ -78,7 +78,7 @@ pub async fn handle_send_command(matches: &ArgMatches) -> CliResult<()> {
     }
 
     // Execute broker operations
-    send_message_to_broker(message, topic, schema_file.is_some())?;
+    send_message_to_broker(message, topic.to_string(), schema_file.is_some())?;
 
     Ok(())
 }

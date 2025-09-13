@@ -1,6 +1,7 @@
 use clap::{Arg, Command};
 use std::error::Error;
-
+use pilgrimage::auth::cli_auth::{CliAuthManager, CliAuthError};
+use log::{error, debug};
 mod commands;
 mod error;
 
@@ -331,6 +332,47 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     Arg::new("api-only")
                         .long("api-only")
                         .help("Start API endpoints only (no dashboard)")
+                        .action(clap::ArgAction::SetTrue),
+                ),
+        )
+        // Authentication commands
+        .subcommand(
+            Command::new("login")
+                .about("Login to authenticate CLI session")
+                .arg(
+                    Arg::new("username")
+                        .short('u')
+                        .long("username")
+                        .value_name("USERNAME")
+                        .help("Username for authentication"),
+                )
+                .arg(
+                    Arg::new("interactive")
+                        .short('i')
+                        .long("interactive")
+                        .help("Interactive login (prompts for credentials)")
+                        .action(clap::ArgAction::SetTrue),
+                ),
+        )
+        .subcommand(
+            Command::new("logout")
+                .about("Logout and clear authentication session")
+                .arg(
+                    Arg::new("force")
+                        .short('f')
+                        .long("force")
+                        .help("Force logout even if no active session")
+                        .action(clap::ArgAction::SetTrue),
+                ),
+        )
+        .subcommand(
+            Command::new("whoami")
+                .about("Show current authentication status")
+                .arg(
+                    Arg::new("detailed")
+                        .short('d')
+                        .long("detailed")
+                        .help("Show detailed session information")
                         .action(clap::ArgAction::SetTrue),
                 ),
         )
@@ -759,15 +801,90 @@ async fn main() -> Result<(), Box<dyn Error>> {
         )
         .get_matches();
 
-    let result = match matches.subcommand() {
-        Some(("start", sub_matches)) => handle_start_command(sub_matches).await,
-        Some(("stop", sub_matches)) => handle_stop_command(sub_matches).await,
-        Some(("send", sub_matches)) => handle_send_command(sub_matches).await,
-        Some(("consume", sub_matches)) => handle_consume_command(sub_matches).await,
-        Some(("status", sub_matches)) => handle_status_command(sub_matches).await,
-        Some(("web", sub_matches)) => handle_web_command(sub_matches).await,
+    // Initialize logging
+    simplelog::TermLogger::init(
+        log::LevelFilter::Info,
+        simplelog::Config::default(),
+        simplelog::TerminalMode::Mixed,
+    ).ok();
 
-        Some(("topic", sub_matches)) => match sub_matches.subcommand() {
+    let result = match matches.subcommand() {
+        // Authentication commands - no auth required
+        Some(("login", sub_matches)) => {
+            let args = login::LoginArgs {
+                username: sub_matches.get_one::<String>("username").cloned(),
+                interactive: sub_matches.get_flag("interactive"),
+            };
+            handle_login_command(args).map_err(|e| CliError::AuthenticationError(e.to_string()))
+        },
+        Some(("logout", sub_matches)) => {
+            let args = logout::LogoutArgs {
+                force: sub_matches.get_flag("force"),
+            };
+            handle_logout_command(args).map_err(|e| CliError::AuthenticationError(e.to_string()))
+        },
+        Some(("whoami", sub_matches)) => {
+            let args = whoami::WhoamiArgs {
+                detailed: sub_matches.get_flag("detailed"),
+            };
+            handle_whoami_command(args).map_err(|e| CliError::AuthenticationError(e.to_string()))
+        },
+
+        // All other commands require authentication
+        Some((cmd_name, sub_matches)) => {
+            // Check authentication before executing command
+            let auth_manager = CliAuthManager::default();
+            match auth_manager.require_auth(cmd_name) {
+                Ok(session) => {
+                    debug!("Authenticated user '{}' for command '{}'", session.username, cmd_name);
+                    execute_authenticated_command(cmd_name, sub_matches).await
+                },
+                Err(CliAuthError::NotAuthenticated) | Err(CliAuthError::SessionNotFound) | Err(CliAuthError::TokenExpired) => {
+                    error!("Authentication required for command: {}", cmd_name);
+                    eprintln!("🔒 Authentication required!");
+                    eprintln!("Please login first using: pilgrimage login");
+                    eprintln!("");
+                    eprintln!("Default credentials:");
+                    eprintln!("  admin/admin123 (full access)");
+                    eprintln!("  user/user123 (limited access)");
+                    std::process::exit(1);
+                },
+                Err(CliAuthError::PermissionDenied) => {
+                    error!("Permission denied for command: {}", cmd_name);
+                    eprintln!("❌ Permission denied!");
+                    eprintln!("You don't have permission to execute '{}'", cmd_name);
+                    eprintln!("Current permissions can be checked with: pilgrimage whoami");
+                    std::process::exit(1);
+                },
+                Err(e) => {
+                    error!("Authentication error: {}", e);
+                    eprintln!("❌ Authentication error: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        },
+
+        None => Err(CliError::NoCommand),
+    };
+
+    if let Err(err) = result {
+        eprintln!("Error: {}", err);
+        std::process::exit(1);
+    }
+
+    Ok(())
+}
+
+async fn execute_authenticated_command(cmd_name: &str, sub_matches: &clap::ArgMatches) -> Result<(), CliError> {
+    match cmd_name {
+        "start" => handle_start_command(sub_matches).await,
+        "stop" => handle_stop_command(sub_matches).await,
+        "send" => handle_send_command(sub_matches).await,
+        "consume" => handle_consume_command(sub_matches).await,
+        "status" => handle_status_command(sub_matches).await,
+        "web" => handle_web_command(sub_matches).await,
+
+        "topic" => match sub_matches.subcommand() {
             Some(("create", create_matches)) => handle_topic_create_command(create_matches)
                 .await
                 .map_err(|e| CliError::BrokerError {
@@ -797,7 +914,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             _ => Err(CliError::InvalidCommand("topic".to_string())),
         },
 
-        Some(("schema", sub_matches)) => match sub_matches.subcommand() {
+        "schema" => match sub_matches.subcommand() {
             Some(("register", register_matches)) => {
                 handle_schema_register_command(register_matches).await
             }
@@ -815,7 +932,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             _ => Err(CliError::InvalidCommand("schema".to_string())),
         },
 
-        Some(("group", sub_matches)) => match sub_matches.subcommand() {
+        "group" => match sub_matches.subcommand() {
             Some(("list", list_matches)) => {
                 handle_group_list_command(list_matches)
                     .await
@@ -839,7 +956,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             _ => Err(CliError::InvalidCommand("group".to_string())),
         },
 
-        Some(("security", sub_matches)) => {
+        "security" => {
             match sub_matches.subcommand() {
                 Some(("auth", auth_matches)) => handle_auth_setup_command(auth_matches)
                     .await
@@ -873,7 +990,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             }
         }
 
-        Some(("metrics", sub_matches)) => {
+        "metrics" => {
             match sub_matches.subcommand() {
                 Some(("show", show_matches)) => handle_metrics_show_command(show_matches)
                     .await
@@ -907,8 +1024,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     }),
                 _ => Err(CliError::InvalidCommand("metrics".to_string())),
             }
-        }
-        Some(("load-test", sub_matches)) => match sub_matches.subcommand() {
+    },
+        "load-test" => match sub_matches.subcommand() {
             Some(("producer", producer_matches)) => handle_producer_test_command(producer_matches)
                 .await
                 .map_err(|e| CliError::BrokerError {
@@ -950,16 +1067,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
             _ => Err(CliError::InvalidCommand("load-test".to_string())),
         },
 
-        Some((cmd, _)) => Err(CliError::UnknownCommand(cmd.to_string())),
-        None => Err(CliError::NoCommand),
-    };
-
-    if let Err(err) = result {
-        eprintln!("Error: {}", err);
-        std::process::exit(1);
+        _ => Err(CliError::UnknownCommand(cmd_name.to_string())),
     }
-
-    Ok(())
 }
 
 // Fixed CLI Tests for Pilgrimage
@@ -969,6 +1078,8 @@ mod tests {
     use clap::{Arg, Command};
     use std::fs;
     use std::path::Path;
+
+    // 簡易版 create_test_app は削除。下の包括版を使用します。
 
     // Helper function to cleanup test directories
     fn cleanup_test_dir(dir: &str) {

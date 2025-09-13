@@ -80,6 +80,8 @@ toml = "0.8"
 serde_yaml = "0.9"
 x509-parser = "0.15"
 notify = "6"
+rpassword = "7.0"
+dirs = "5.0"
 
 [features]
 default = []

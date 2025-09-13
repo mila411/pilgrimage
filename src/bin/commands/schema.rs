@@ -71,7 +71,7 @@ pub async fn handle_schema_register_command(matches: &ArgMatches) -> CliResult<(
             message: "Schema file not specified".to_string(),
         })?;
 
-    let schema_content = fs::read_to_string(schema_file).map_err(|e| CliError::IoError(e))?;
+    let schema_content = fs::read_to_string(schema_file).map_err(|e| CliError::IoError(e.to_string()))?;
 
     let compatibility = parse_compatibility(matches.value_of("compatibility"));
 
@@ -181,7 +181,7 @@ pub async fn handle_schema_validate_command(matches: &ArgMatches) -> CliResult<(
 
     println!("✅ Validating schema from '{}'...", schema_file);
 
-    let schema_content = fs::read_to_string(schema_file).map_err(|e| CliError::IoError(e))?;
+    let schema_content = fs::read_to_string(schema_file).map_err(|e| CliError::IoError(e.to_string()))?;
 
     // Validate schema syntax
     let validation_result = validate_schema_syntax(&schema_content).await?;
@@ -190,7 +190,7 @@ pub async fn handle_schema_validate_command(matches: &ArgMatches) -> CliResult<(
     // If message file provided, validate message against schema
     if let Some(msg_file) = message_file {
         println!("\n🔍 Validating message against schema...");
-        let message_content = fs::read_to_string(msg_file).map_err(|e| CliError::IoError(e))?;
+    let message_content = fs::read_to_string(msg_file).map_err(|e| CliError::IoError(e.to_string()))?;
         let message_validation =
             validate_message_against_schema(&schema_content, &message_content).await?;
         display_message_validation(&message_validation)?;
@@ -254,7 +254,7 @@ pub async fn handle_schema_compatibility_command(matches: &ArgMatches) -> CliRes
     println!("   Schema: {}", schema_file);
     println!("   Level: {}", compatibility_level);
 
-    let schema_content = fs::read_to_string(schema_file).map_err(|e| CliError::IoError(e))?;
+    let schema_content = fs::read_to_string(schema_file).map_err(|e| CliError::IoError(e.to_string()))?;
 
     let compatibility_result =
         check_detailed_compatibility(topic, &schema_content, compatibility_level).await?;

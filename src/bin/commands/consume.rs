@@ -30,12 +30,9 @@ pub async fn handle_consume_command(matches: &ArgMatches) -> CliResult<()> {
         1, // Default number of partitions
         1, // default replication factor
         &storage_path,
-    )
-    .map_err(|e| {
-        Box::new(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            format!("Failed to initialize broker: {}", e),
-        )) as Box<dyn std::error::Error>
+    ).map_err(|e| CliError::BrokerError {
+        kind: BrokerErrorKind::OperationFailed,
+        message: format!("Failed to initialize broker: {}", e),
     })?;
 
     let broker = Arc::new(Mutex::new(broker));
