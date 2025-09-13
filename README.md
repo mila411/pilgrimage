@@ -939,6 +939,34 @@ pilgrimage status --id <BROKER_ID> [--detailed] [--format <FORMAT>]
 pilgrimage status --id broker1 --detailed --format json
 ```
 
+#### `stop` - Stop Broker
+
+Stop a running broker instance gracefully or forcefully:
+
+**Usage:**
+
+```bash
+pilgrimage stop --id <BROKER_ID> [--force] [--timeout <SECONDS>]
+```
+
+**Options:**
+- `--id, -i`: Broker identifier to stop
+- `--force, -f`: Force stop without graceful shutdown
+- `--timeout, -t`: Graceful shutdown timeout in seconds (default: 30)
+
+**Example:**
+
+```bash
+# Graceful shutdown with default timeout
+pilgrimage stop --id broker1
+
+# Force stop immediately
+pilgrimage stop --id broker1 --force
+
+# Graceful shutdown with custom timeout
+pilgrimage stop --id broker1 --timeout 60
+```
+
 #### `schema` - Schema Management
 
 Manage schemas with full registry capabilities:
