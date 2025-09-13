@@ -126,29 +126,28 @@ async fn main() -> Result<(), Box<dyn Error>> {
         // Stop command - enhanced
         .subcommand(
             Command::new("stop")
-                .about("Stop the message broker")
+                .about("Stop a running broker")
                 .arg(
                     Arg::new("id")
-                        .short('i')
                         .long("id")
-                        .value_name("ID")
-                        .help("Broker instance ID to stop")
+                        .short('i')
+                        .value_name("BROKER_ID")
+                        .help("Broker ID to stop")
                         .required(true),
                 )
                 .arg(
                     Arg::new("force")
-                        .short('f')
                         .long("force")
+                        .short('f')
                         .help("Force stop without graceful shutdown")
                         .action(clap::ArgAction::SetTrue),
                 )
                 .arg(
                     Arg::new("timeout")
-                        .short('t')
                         .long("timeout")
+                        .short('t')
                         .value_name("SECONDS")
-                        .help("Graceful shutdown timeout")
-                        .default_value("30"),
+                        .help("Graceful shutdown timeout in seconds (default: 30)"),
                 ),
         )
         // Send command - enhanced
@@ -1554,7 +1553,7 @@ port = 8080
                             .long("timeout")
                             .value_name("SECONDS")
                             .help("Graceful shutdown timeout")
-                            .default_value("10"),
+                            .default_value("30"),
                     ),
             )
             // Status command

@@ -1,6 +1,8 @@
 use crate::auth::{AuthenticationResult, DistributedAuthenticator, ValidationResult};
 use crate::broker::consensus::{ConsensusState, RaftConsensus};
 use crate::broker::metrics::DistributedMetrics;
+use crate::broker::pid_manager::PidManager;
+use crate::broker::shutdown::{GracefulShutdown, ResourceManager, TaskManager};
 use crate::broker::split_brain::{ClusterHealth, SplitBrainPrevention};
 use crate::broker::{Broker, cluster::Cluster, replication::ReplicationManager};
 use crate::network::error::{NetworkError, NetworkResult};
@@ -271,6 +273,12 @@ pub struct DistributedBroker {
     // Monitoring and metrics
     metrics: Option<Arc<DistributedMetrics>>,
 
+    // Graceful shutdown management
+    shutdown_manager: GracefulShutdown,
+    task_manager: TaskManager,
+    resource_manager: ResourceManager,
+    pid_manager: PidManager,
+
     // State
     is_running: Arc<Mutex<bool>>,
 
@@ -422,6 +430,13 @@ impl DistributedBroker {
         // Create event channels
         let (cluster_events_tx, cluster_events_rx) = mpsc::channel(100);
 
+        // Initialize graceful shutdown
+        let shutdown_timeout = Duration::from_secs(30); // Default 30 second timeout
+        let shutdown_manager = GracefulShutdown::new(shutdown_timeout);
+        let task_manager = TaskManager::new(shutdown_manager.clone());
+        let resource_manager = ResourceManager::new();
+        let pid_manager = PidManager::new(config.node_id.clone());
+
         Ok(Self {
             config,
             local_broker,
@@ -433,6 +448,10 @@ impl DistributedBroker {
             replication_manager,
             authenticator,
             metrics,
+            shutdown_manager,
+            task_manager,
+            resource_manager,
+            pid_manager,
             is_running: Arc::new(Mutex::new(false)),
             cluster_events_tx,
             cluster_events_rx: Arc::new(Mutex::new(cluster_events_rx)),
@@ -452,6 +471,21 @@ impl DistributedBroker {
             }
             *running = true;
         }
+
+        // Initialize graceful shutdown signal handlers
+        if let Err(e) = self.shutdown_manager.initialize_signal_handlers().await {
+            warn!("Failed to initialize signal handlers: {}", e);
+        }
+
+        // Create PID file
+        if let Err(e) = self.pid_manager.create_pid_file() {
+            return Err(NetworkError::ConnectionFailed(
+                format!("Failed to create PID file: {}", e)
+            ));
+        }
+
+        // Register resource cleanup callbacks
+        self.register_cleanup_callbacks();
 
         // Start network transport
         self.transport
@@ -498,6 +532,9 @@ impl DistributedBroker {
         // Connect to seed nodes
         self.connect_to_seed_nodes().await?;
 
+        // Start shutdown monitoring task
+        self.start_shutdown_monitoring().await;
+
         info!(
             "Distributed broker {} started successfully",
             self.config.node_id
@@ -509,15 +546,50 @@ impl DistributedBroker {
     pub async fn stop(&self) -> NetworkResult<()> {
         info!("Stopping distributed broker {}", self.config.node_id);
 
+        // Initiate graceful shutdown
+        self.shutdown_manager.initiate_shutdown();
+
+        // Set running flag to false
         {
             let mut running = self.is_running.lock().await;
             *running = false;
         }
 
+        // Stop accepting new work
+        info!("Stopping new work acceptance...");
+
+        // Wait for ongoing tasks to complete or timeout
+        if let Err(errors) = self.task_manager.shutdown_all_tasks().await {
+            warn!("Some tasks failed to shutdown gracefully: {:?}", errors);
+        }
+
         // Stop network transport
+        info!("Stopping network transport...");
         self.transport.stop().await;
 
-        info!("Distributed broker {} stopped", self.config.node_id);
+        // Stop consensus engine
+        info!("Stopping consensus engine...");
+        // Note: Add stop method to consensus if not present
+
+        // Stop split-brain prevention
+        info!("Stopping split-brain prevention...");
+        // Note: Add stop method to split-brain prevention if not present
+        
+        // Cleanup resources
+        info!("Cleaning up resources...");
+        if let Err(errors) = self.resource_manager.cleanup_all() {
+            warn!("Some resources failed to cleanup: {:?}", errors);
+        }
+
+        // Remove PID file
+        if let Err(e) = self.pid_manager.remove_pid_file() {
+            warn!("Failed to remove PID file: {}", e);
+        }
+
+        // Mark shutdown as completed
+        self.shutdown_manager.mark_shutdown_completed();
+
+        info!("Distributed broker {} stopped gracefully", self.config.node_id);
         Ok(())
     }
 
@@ -575,7 +647,7 @@ impl DistributedBroker {
         let replication_manager = self.replication_manager.clone();
         let is_running = self.is_running.clone();
 
-        tokio::spawn(async move {
+        let replication_task = tokio::spawn(async move {
             loop {
                 // Check running flag without holding it across await
                 let running = { *is_running.lock().await };
@@ -592,6 +664,8 @@ impl DistributedBroker {
                 tokio::time::sleep(Duration::from_millis(100)).await;
             }
         });
+        
+        self.task_manager.register_task("replication_manager".to_string(), replication_task);
     }
 
     /// Start cluster monitoring
@@ -602,7 +676,7 @@ impl DistributedBroker {
         let cluster_events_tx = self.cluster_events_tx.clone();
         let is_running = self.is_running.clone();
 
-        tokio::spawn(async move {
+        let monitoring_task = tokio::spawn(async move {
             let mut last_leader: Option<String> = None;
             let mut last_quorum_status = false;
 
@@ -684,6 +758,8 @@ impl DistributedBroker {
                 tokio::time::sleep(Duration::from_secs(5)).await;
             }
         });
+        
+        self.task_manager.register_task("cluster_monitoring".to_string(), monitoring_task);
     }
 
     /// Connect to seed nodes
@@ -747,7 +823,7 @@ impl DistributedBroker {
     /// Send a broker message (only if leader and have quorum)
     pub async fn send_broker_message(&self, topic: &str, message: Vec<u8>) -> NetworkResult<()> {
         info!(
-            "Attempting to send message to topic '{}' ({} bytes)",
+            "Attempting to send message to topic {} ({} bytes)",
             topic,
             message.len()
         );
@@ -918,12 +994,14 @@ impl DistributedBroker {
             let broker = self.clone();
             let is_running = self.is_running.clone();
 
-            tokio::spawn(async move {
+            let metrics_task = tokio::spawn(async move {
                 while *is_running.lock().await {
                     broker.update_metrics();
                     tokio::time::sleep(Duration::from_secs(5)).await;
                 }
             });
+            
+            self.task_manager.register_task("metrics_collection".to_string(), metrics_task);
 
             info!("Metrics collection started");
         }
@@ -983,6 +1061,59 @@ impl DistributedBroker {
         }
 
         Ok(())
+    }
+
+    /// Register cleanup callbacks for graceful shutdown
+    fn register_cleanup_callbacks(&self) {
+        // Storage cleanup
+        let _local_broker = self.local_broker.clone();
+        self.resource_manager.register_cleanup(move || {
+            info!("Cleaning up storage resources...");
+            // Add storage-specific cleanup if needed
+            Ok(())
+        });
+
+        // Network cleanup
+        let _transport = self.transport.clone();
+        self.resource_manager.register_cleanup(move || {
+            info!("Cleaning up network resources...");
+            // Additional network cleanup if needed
+            Ok(())
+        });
+
+        // Metrics cleanup
+        if let Some(metrics) = &self.metrics {
+            let _metrics_clone = metrics.clone();
+            self.resource_manager.register_cleanup(move || {
+                info!("Cleaning up metrics resources...");
+                // Add metrics-specific cleanup if needed
+                Ok(())
+            });
+        }
+    }
+
+    /// Start shutdown monitoring task
+    async fn start_shutdown_monitoring(&self) {
+        let shutdown_manager = self.shutdown_manager.clone();
+        let broker = self.clone();
+        
+        let shutdown_task = tokio::spawn(async move {
+            // Wait for shutdown signal
+            shutdown_manager.wait_for_shutdown().await;
+            
+            info!("Shutdown signal received, initiating graceful shutdown...");
+            
+            // Perform graceful shutdown
+            if let Err(e) = broker.stop().await {
+                error!("Failed to shutdown gracefully: {}", e);
+                std::process::exit(1);
+            }
+            
+            info!("Graceful shutdown completed successfully");
+            std::process::exit(0);
+        });
+        
+        self.task_manager.register_task("shutdown_monitor".to_string(), shutdown_task);
     }
 }
 

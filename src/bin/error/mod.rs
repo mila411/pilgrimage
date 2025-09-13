@@ -25,6 +25,8 @@ pub enum CliError {
 pub enum BrokerErrorKind {
     ConnectionFailed,
     OperationFailed,
+    #[allow(dead_code)]
+    // Reserved for future use: differentiate broker-not-found cases
     NotFound,
     Timeout,
     TopicNotFound,
