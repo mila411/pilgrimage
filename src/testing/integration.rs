@@ -79,7 +79,7 @@ impl IntegrationTestSuite {
 
         // Configuration validation test
         if let Err(e) = config_manager.validate() {
-            return TestResult::failed(&format!("Configuration validation failed: {}", e));
+            return TestResult::failed(&format!("Configuration validation failed: {:?}", e));
         }
 
         println!("    ✅ Configuration management functionality confirmed");
