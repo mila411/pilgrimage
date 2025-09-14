@@ -295,6 +295,24 @@
         border-radius: 8px;
         margin-bottom: 20px;
       }
+      /* Password strength meter */
+      .meter {
+        height: 8px;
+        background: #e5e7eb;
+        border-radius: 4px;
+        overflow: hidden;
+        width: 200px;
+      }
+      .meter-fill {
+        height: 100%;
+        width: 0%;
+        transition: width 0.2s ease;
+      }
+      .meter-text {
+        font-size: 12px;
+        color: #666;
+        min-width: 80px;
+      }
     </style>
   </head>
   <body>
@@ -536,9 +554,19 @@ Hello from Pilgrimage Web Console!</textarea
               <button onclick="getSecurityStatus()">
                 &#128737; Get Security Status
               </button>
-              <button class="secondary" onclick="getAuditLogs()">
-                &#128203; View Audit Logs
-              </button>
+              <div
+                style="
+                  display: flex;
+                  gap: 8px;
+                  align-items: center;
+                  flex-wrap: wrap;
+                  margin-top: 6px;
+                "
+              >
+                <button class="secondary" onclick="getAuditLogs()">
+                  &#128203; View Audit Logs
+                </button>
+              </div>
               <div id="security-result" class="result"></div>
             </div>
 
@@ -577,6 +605,14 @@ Hello from Pilgrimage Web Console!</textarea
                   id="new-password"
                   placeholder="new password"
                 />
+                <div class="meter" title="Password strength">
+                  <div
+                    id="new-password-meter"
+                    class="meter-fill"
+                    style="background: #ef4444"
+                  ></div>
+                </div>
+                <span id="new-password-meter-text" class="meter-text"></span>
               </div>
               <div class="form-group">
                 <label>Role:</label>
@@ -588,6 +624,70 @@ Hello from Pilgrimage Web Console!</textarea
               </div>
               <button onclick="createUser()">🆕 Create User</button>
               <div id="create-user-result" class="result"></div>
+            </div>
+
+            <div class="endpoint">
+              <h3>🗑️ Delete User</h3>
+              <div class="form-group">
+                <label>Username:</label>
+                <input
+                  type="text"
+                  id="delete-username"
+                  list="delete-users-list"
+                  placeholder="username"
+                />
+                <datalist id="delete-users-list"></datalist>
+              </div>
+              <button
+                id="btn-delete-user"
+                class="danger"
+                onclick="deleteUser()"
+              >
+                🗑️ Delete User
+              </button>
+              <div id="delete-user-result" class="result"></div>
+            </div>
+
+            <div class="endpoint">
+              <h3>🔒 Reset User Password</h3>
+              <div class="form-group">
+                <label>Username:</label>
+                <input
+                  type="text"
+                  id="reset-username"
+                  list="reset-users-list"
+                  placeholder="username"
+                />
+                <datalist id="reset-users-list"></datalist>
+              </div>
+              <div class="form-group">
+                <label>New Password:</label>
+                <input
+                  type="password"
+                  id="reset-new-password"
+                  placeholder="new password"
+                />
+                <div class="meter" title="Password strength">
+                  <div
+                    id="reset-password-meter"
+                    class="meter-fill"
+                    style="background: #ef4444"
+                  ></div>
+                </div>
+                <span id="reset-password-meter-text" class="meter-text"></span>
+              </div>
+              <div class="form-group">
+                <label>Confirm New Password:</label>
+                <input
+                  type="password"
+                  id="reset-confirm-password"
+                  placeholder="confirm new password"
+                />
+              </div>
+              <button id="btn-reset-password" onclick="resetUserPassword()">
+                🔒 Reset Password
+              </button>
+              <div id="reset-password-result" class="result"></div>
             </div>
           </div>
         </div>
@@ -767,24 +867,14 @@ Hello from Pilgrimage Web Console!</textarea
             `Response status: ${response.status}, ok: ${response.ok}`
           );
 
-          // Handle authentication errors
+          // Handle authentication errors (do NOT auto-logout on 401)
           if (response.status === 401) {
-            console.log(
-              "401 error received, clearing session and showing login"
+            console.warn(
+              "401 received; preserving session to avoid auto-logout on reload."
             );
-            // Only clear session if we actually had a token (not for public endpoints)
-            if (authToken && !isPublicEndpoint) {
-              authToken = null;
-              currentUser = null;
-              userRole = null;
-              localStorage.removeItem("authToken");
-              localStorage.removeItem("currentUser");
-              localStorage.removeItem("userRole");
-              showLoginScreen();
-            }
             return {
               status: response.status,
-              body: "Authentication required. Please login again.",
+              body: "Authentication required.",
               ok: false,
             };
           }
@@ -1076,11 +1166,10 @@ Hello from Pilgrimage Web Console!</textarea
       }
 
       async function getAuditLogs() {
-        // Placeholder for audit log functionality
+        const result = await makeRequest(`/security/audit-logs`, "GET");
         updateResult("security-result", {
-          status: "Info",
-          body: "Audit log functionality would be implemented here",
-          ok: true,
+          ...result,
+          body: formatJSON(result.body),
         });
       }
 
@@ -1093,6 +1182,108 @@ Hello from Pilgrimage Web Console!</textarea
           ...result,
           body: formatJSON(result.body),
         });
+      }
+
+      async function loadUsersForDelete() {
+        const dl = document.getElementById("delete-users-list");
+        if (!dl) return;
+        // 入力欄を常に初期化（削除直後などの残存値を防ぐ）
+        const delInput = document.getElementById("delete-username");
+        if (delInput) {
+          delInput.value = "";
+          // さらに確実にクリアするため要素をクローン置換（IMEや候補の残像対策）
+          const clone = delInput.cloneNode(true);
+          delInput.parentNode.replaceChild(clone, delInput);
+        }
+        dl.innerHTML = "";
+        const result = await makeRequest("/security/users", "GET");
+        if (!result.ok) {
+          updateResult("delete-user-result", {
+            ok: false,
+            status: result.status,
+            body: `Failed to load users: ${result.body}`,
+          });
+          const delInput = document.getElementById("delete-username");
+          if (delInput) delInput.value = "";
+          return;
+        }
+        try {
+          const users = JSON.parse(result.body);
+          users.forEach((u) => {
+            const opt = document.createElement("option");
+            opt.value = u; // datalistはvalueのみ
+            dl.appendChild(opt);
+          });
+        } catch (e) {
+          updateResult("delete-user-result", {
+            ok: false,
+            status: "ParseError",
+            body: "Invalid users response",
+          });
+        }
+      }
+
+      async function loadUsersForReset() {
+        const dl = document.getElementById("reset-users-list");
+        if (!dl) return;
+        dl.innerHTML = "";
+        const result = await makeRequest("/security/users", "GET");
+        if (!result.ok) {
+          updateResult("reset-password-result", {
+            ok: false,
+            status: result.status,
+            body: `Failed to load users: ${result.body}`,
+          });
+          return;
+        }
+        try {
+          const users = JSON.parse(result.body);
+          users.forEach((u) => {
+            const opt = document.createElement("option");
+            opt.value = u; // datalistはvalueのみ使用
+            dl.appendChild(opt);
+          });
+        } catch (e) {
+          updateResult("reset-password-result", {
+            ok: false,
+            status: "ParseError",
+            body: "Invalid users response",
+          });
+        }
+      }
+
+      function isValidUsername(u) {
+        // 3-32 chars: letters, numbers, underscore, hyphen
+        return /^[A-Za-z0-9_-]{3,32}$/.test(u);
+      }
+
+      function passwordStrength(pw) {
+        let score = 0;
+        if (pw.length >= 8) score++;
+        if (/[A-Z]/.test(pw)) score++;
+        if (/[a-z]/.test(pw)) score++;
+        if (/[0-9]/.test(pw)) score++;
+        if (/[^A-Za-z0-9]/.test(pw)) score++;
+        return score; // 0-5
+      }
+
+      function updateStrengthMeter(score, barEl, textEl) {
+        const perc = Math.min(100, Math.max(0, score * 20));
+        if (barEl) barEl.style.width = perc + "%";
+        let label = "Very Weak";
+        let color = "#ef4444";
+        if (score >= 4) {
+          label = "Strong";
+          color = "#10b981";
+        } else if (score === 3) {
+          label = "Good";
+          color = "#f59e0b";
+        } else if (score === 2) {
+          label = "Weak";
+          color = "#f97316";
+        }
+        if (barEl) barEl.style.background = color;
+        if (textEl) textEl.textContent = label;
       }
 
       async function createUser() {
@@ -1109,6 +1300,25 @@ Hello from Pilgrimage Web Console!</textarea
           return;
         }
 
+        if (!isValidUsername(username)) {
+          updateResult("create-user-result", {
+            ok: false,
+            status: "Validation",
+            body: "Username must be 3-32 chars (letters, numbers, _ or -)",
+          });
+          return;
+        }
+
+        if (passwordStrength(password) < 3) {
+          // at least length>=8 and two classes
+          updateResult("create-user-result", {
+            ok: false,
+            status: "Validation",
+            body: "Password too weak (min 8 chars, include mixed character types)",
+          });
+          return;
+        }
+
         const result = await makeRequest("/security/create-user", "POST", {
           username,
           password,
@@ -1118,7 +1328,183 @@ Hello from Pilgrimage Web Console!</textarea
           ...result,
           body: formatJSON(result.body),
         });
+        if (result.ok) {
+          // Refresh delete-user list and preselect the newly created user
+          try {
+            const data = JSON.parse(result.body || "{}");
+            await loadUsersForDelete();
+            await loadUsersForReset();
+            // フォームをリセット（ユーザー名/パスワード/ロール/強度メーター）
+            const u = document.getElementById("new-username");
+            const p = document.getElementById("new-password");
+            const r = document.getElementById("new-role");
+            if (u) u.value = "";
+            if (p) p.value = "";
+            if (r) r.value = "user";
+            const bar = document.getElementById("new-password-meter");
+            const txt = document.getElementById("new-password-meter-text");
+            if (bar) {
+              bar.style.width = "0%";
+              bar.style.background = "#ef4444";
+            }
+            if (txt) {
+              txt.textContent = "";
+            }
+          } catch (_) {
+            // ignore parse errors
+            await loadUsersForDelete();
+            await loadUsersForReset();
+          }
+        }
       }
+
+      async function deleteUser() {
+        const el = document.getElementById("delete-username");
+        const username = (el && el.value ? el.value : "").trim();
+        if (!username) {
+          updateResult("delete-user-result", {
+            ok: false,
+            status: 400,
+            body: "Username is required",
+          });
+          return;
+        }
+        if (username === "admin") {
+          updateResult("delete-user-result", {
+            ok: false,
+            status: 400,
+            body: "admin user cannot be deleted",
+          });
+          return;
+        }
+        if (!isValidUsername(username)) {
+          updateResult("delete-user-result", {
+            ok: false,
+            status: 400,
+            body: "Invalid username format",
+          });
+          return;
+        }
+        const result = await makeRequest(
+          "/security/admin-delete-user",
+          "POST",
+          { username }
+        );
+        updateResult("delete-user-result", {
+          ...result,
+          body: formatJSON(result.body),
+        });
+        if (result.ok) {
+          // Refresh list after deletion
+          const delInput = document.getElementById("delete-username");
+          if (delInput) {
+            delInput.value = "";
+            delInput.blur();
+            // 値をクリアしてもブラウザが表示を保持する場合があるため、クローン置換で完全リセット
+            const clone = delInput.cloneNode(true);
+            delInput.parentNode.replaceChild(clone, delInput);
+          }
+          loadUsersForDelete();
+          loadUsersForReset();
+        }
+      }
+
+      async function resetUserPassword() {
+        const input = document.getElementById("reset-username");
+        const username = (input && input.value ? input.value : "").trim();
+        const newPassword = document
+          .getElementById("reset-new-password")
+          .value.trim();
+        const confirm = document
+          .getElementById("reset-confirm-password")
+          .value.trim();
+        if (!username || !newPassword) {
+          updateResult("reset-password-result", {
+            ok: false,
+            status: 400,
+            body: "Username and new password are required",
+          });
+          return;
+        }
+        if (newPassword !== confirm) {
+          updateResult("reset-password-result", {
+            ok: false,
+            status: 400,
+            body: "Passwords do not match",
+          });
+          return;
+        }
+        if (!isValidUsername(username)) {
+          updateResult("reset-password-result", {
+            ok: false,
+            status: 400,
+            body: "Invalid username format",
+          });
+          return;
+        }
+        if (passwordStrength(newPassword) < 3) {
+          updateResult("reset-password-result", {
+            ok: false,
+            status: 400,
+            body: "Password too weak (min 8 chars, include mixed character types)",
+          });
+          return;
+        }
+        const result = await makeRequest(
+          "/security/admin-reset-password",
+          "POST",
+          { username, new_password: newPassword }
+        );
+        updateResult("reset-password-result", {
+          ...result,
+          body: formatJSON(result.body),
+        });
+        if (result.ok) {
+          // フォームと強度メーターをリセット
+          const inputUser = document.getElementById("reset-username");
+          const inputPw = document.getElementById("reset-new-password");
+          const inputConfirm = document.getElementById(
+            "reset-confirm-password"
+          );
+          if (inputUser) inputUser.value = "";
+          if (inputPw) inputPw.value = "";
+          if (inputConfirm) inputConfirm.value = "";
+          const bar = document.getElementById("reset-password-meter");
+          const txt = document.getElementById("reset-password-meter-text");
+          if (bar) {
+            bar.style.width = "0%";
+            bar.style.background = "#ef4444";
+          }
+          if (txt) {
+            txt.textContent = "";
+          }
+          // 候補も更新
+          loadUsersForReset();
+        }
+      }
+
+      // Load users when Security tab becomes active or on initial show
+      const tabs = document.querySelectorAll(".tab");
+      tabs.forEach((tab) => {
+        tab.addEventListener("click", (e) => {
+          const target = e.target;
+          if (
+            target &&
+            target.textContent &&
+            target.textContent.includes("Security")
+          ) {
+            loadUsersForDelete();
+            loadUsersForReset();
+          }
+        });
+      });
+      // Also load once after login showing main console
+      const _showMainConsole = showMainConsole;
+      showMainConsole = function () {
+        _showMainConsole();
+        loadUsersForDelete();
+        loadUsersForReset();
+      };
 
       // Monitoring Functions
       async function getMetrics() {
@@ -1292,6 +1678,26 @@ Hello from Pilgrimage Web Console!</textarea
             clearInterval(performanceMonitorInterval);
           }
         });
+
+        // Wire password strength meters
+        const newPw = document.getElementById("new-password");
+        const newBar = document.getElementById("new-password-meter");
+        const newTxt = document.getElementById("new-password-meter-text");
+        if (newPw)
+          newPw.addEventListener("input", () =>
+            updateStrengthMeter(passwordStrength(newPw.value), newBar, newTxt)
+          );
+        const resetPw = document.getElementById("reset-new-password");
+        const resetBar = document.getElementById("reset-password-meter");
+        const resetTxt = document.getElementById("reset-password-meter-text");
+        if (resetPw)
+          resetPw.addEventListener("input", () =>
+            updateStrengthMeter(
+              passwordStrength(resetPw.value),
+              resetBar,
+              resetTxt
+            )
+          );
       });
 
       // ===== Session Management and Authentication =====

@@ -61,6 +61,8 @@ md5 = "0.7.0"
 rcgen = { version = "0.11", optional = true }
 sha2 = "0.10"
 ring = "0.16"
+argon2 = "0.5"
+password-hash = { version = "0.5", features = ["std"] }
 opentelemetry = "0.20"
 opentelemetry-jaeger = "0.19"
 opentelemetry-otlp = "0.13"

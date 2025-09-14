@@ -781,13 +781,10 @@ impl BatchProcessor {
                 // Prefetch the next message's payload
                 let next_payload = &messages[i + 2].payload.as_bytes();
                 if !next_payload.is_empty() {
-                    // On x86_64, we can use compiler intrinsics for prefetching
-                    #[cfg(target_arch = "x86_64")]
-                    unsafe {
-                        std::arch::x86_64::_mm_prefetch(
-                            next_payload.as_ptr() as *const i8,
-                            std::arch::x86_64::_MM_HINT_T0, // Temporal locality
-                        );
+                    // Software prefetch (safe): touch the first byte to encourage caching
+                    // Using black_box prevents the optimizer from removing the read.
+                    if let Some(b) = next_payload.get(0) {
+                        std::hint::black_box(*b);
                     }
 
                     // For other architectures, the prefetch is a no-op

@@ -85,6 +85,12 @@ impl DistributedAuthenticator {
         self.basic_auth.add_user(username, password);
     }
 
+    /// After a successful authentication with legacy format (plaintext/PBKDF2),
+    /// transparently upgrade the stored hash to Argon2. Returns true if upgraded.
+    pub fn upgrade_user_password_if_legacy(&mut self, username: &str, password: &str) -> bool {
+        self.basic_auth.upgrade_password_if_legacy(username, password)
+    }
+
     /// Check if a user exists
     pub fn user_exists(&self, username: &str) -> bool {
         self.basic_auth.has_user(username)
@@ -220,6 +226,18 @@ impl DistributedAuthenticator {
     ) -> Result<(), String> {
         self.basic_auth
             .change_password(username, current_password, new_password)
+    }
+
+    /// Admin operation: set user password directly (no current password check)
+    pub fn set_user_password_admin(&mut self, username: &str, new_password: &str) -> Result<(), String> {
+        self.basic_auth.set_password(username, new_password)
+    }
+
+    /// Admin operation: remove a user entirely
+    pub fn remove_user(&mut self, username: &str) -> bool {
+        // Also remove any stored user permissions to keep state consistent
+        self.user_permissions.remove(username);
+        self.basic_auth.remove_user(username)
     }
 
     /// Validate a JWT token
@@ -377,6 +395,22 @@ impl DistributedAuthenticator {
     pub fn get_issuer(&self) -> &str {
         &self.issuer
     }
+
+    /// List all usernames (unordered)
+    pub fn list_users(&self) -> Vec<String> {
+        self.basic_auth.list_users()
+    }
+
+    /// Export current credentials and permissions (for persistence)
+    pub fn export_user_state(&self) -> (HashMap<String, String>, HashMap<String, Vec<String>>) {
+        (self.basic_auth.export_credentials(), self.user_permissions.clone())
+    }
+
+    /// Replace credentials and permissions (from persistence)
+    pub fn import_user_state(&mut self, creds: HashMap<String, String>, perms: HashMap<String, Vec<String>>) {
+        self.basic_auth.import_credentials(creds);
+        self.user_permissions = perms;
+    }
 }
 
 #[cfg(test)]
@@ -397,6 +431,20 @@ mod tests {
         assert!(result.success);
         assert!(result.token.is_some());
         assert_eq!(result.permissions, vec!["broker", "replication"]);
+    }
+
+    #[test]
+    fn authenticate_with_hashed_storage() {
+        let jwt_secret = b"secret".to_vec();
+        let mut auth = DistributedAuthenticator::new(jwt_secret, "test".into());
+        auth.add_user("hashuser", "hashpass");
+    // ensure stored is not plaintext
+        let (creds, _) = auth.export_user_state();
+        let stored = creds.get("hashuser").unwrap();
+    assert!(stored.starts_with("$argon2"));
+        // authenticate
+        assert!(auth.authenticate_client("hashuser", "hashpass").success);
+        assert!(!auth.authenticate_client("hashuser", "wrong").success);
     }
 
     #[test]
@@ -846,5 +894,31 @@ mod tests {
         assert_eq!(client_deserialized.client_id, "test_client");
         assert_eq!(client_deserialized.username, "test_user");
         assert_eq!(client_deserialized.roles, vec!["user", "subscriber"]);
+    }
+
+    #[test]
+    fn test_upgrade_legacy_plaintext_via_distributed_auth() {
+        // Prepare authenticator with a legacy plaintext credential
+        let secret = DistributedAuthenticator::generate_jwt_secret();
+        let mut auth = DistributedAuthenticator::new(secret, "test-upgrade".to_string());
+
+        // Import legacy creds directly: username -> plaintext
+        let mut creds = std::collections::HashMap::new();
+        creds.insert("legacy_user".to_string(), "legacy_pass".to_string());
+        let perms = std::collections::HashMap::<String, Vec<String>>::new();
+        auth.import_user_state(creds, perms);
+
+        // Authenticate should succeed (legacy plaintext supported)
+        let res = auth.authenticate_client("legacy_user", "legacy_pass");
+        assert!(res.success);
+
+        // Trigger transparent upgrade through the wrapper method
+        let changed = auth.upgrade_user_password_if_legacy("legacy_user", "legacy_pass");
+        assert!(changed);
+
+        // Export and verify Argon2 format now stored
+        let (creds_after, _) = auth.export_user_state();
+        let stored = creds_after.get("legacy_user").unwrap();
+        assert!(stored.starts_with("$argon2"));
     }
 }

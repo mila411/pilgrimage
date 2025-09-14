@@ -27,6 +27,19 @@
 //! ```
 
 use serde::{Deserialize, Serialize};
+use std::num::NonZeroU32;
+use std::sync::atomic::{AtomicU32, Ordering};
+use argon2::{Algorithm, Argon2, PasswordHash, PasswordHasher, PasswordVerifier, Version, Params};
+use password_hash::SaltString;
+
+// Argon2 デフォルトパラメータ（RFC 9106 の推奨に近い設定）。
+// テストでは後述の setter で下げられます。
+const DEFAULT_M_COST_KIB: u32 = 19_456; // ≈19 MiB
+const DEFAULT_T_COST: u32 = 2;          // time cost
+const DEFAULT_P_COST: u32 = 1;          // parallelism
+static M_COST_KIB: AtomicU32 = AtomicU32::new(DEFAULT_M_COST_KIB);
+static T_COST: AtomicU32 = AtomicU32::new(DEFAULT_T_COST);
+static P_COST: AtomicU32 = AtomicU32::new(DEFAULT_P_COST);
 use std::collections::HashMap;
 use std::error::Error;
 
@@ -78,8 +91,9 @@ impl BasicAuthenticator {
     /// * `username`: A string slice representing the username.
     /// * `password`: A string slice representing the password.
     pub fn add_user(&mut self, username: &str, password: &str) {
+        let hashed = Self::hash_password(password);
         self.credentials
-            .insert(username.to_string(), password.to_string());
+            .insert(username.to_string(), hashed);
     }
 
     /// Returns true if the user already exists in the credential store
@@ -95,14 +109,50 @@ impl BasicAuthenticator {
         new_password: &str,
     ) -> Result<(), String> {
         match self.credentials.get(username) {
-            Some(stored) if stored == current_password => {
-                self.credentials
-                    .insert(username.to_string(), new_password.to_string());
-                Ok(())
+            Some(stored) => {
+                if Self::verify_password(current_password, stored) {
+                    let hashed = Self::hash_password(new_password);
+                    self.credentials.insert(username.to_string(), hashed);
+                    Ok(())
+                } else {
+                    Err("Invalid current password".to_string())
+                }
             }
-            Some(_) => Err("Invalid current password".to_string()),
             None => Err("User not found".to_string()),
         }
+    }
+
+    /// Remove an existing user from the credential store
+    pub fn remove_user(&mut self, username: &str) -> bool {
+        self.credentials.remove(username).is_some()
+    }
+
+    /// Set a user's password without requiring the current password (admin operation)
+    pub fn set_password(&mut self, username: &str, new_password: &str) -> Result<(), String> {
+        if self.credentials.contains_key(username) {
+            let hashed = Self::hash_password(new_password);
+            self.credentials
+                .insert(username.to_string(), hashed);
+            Ok(())
+        } else {
+            Err("User not found".to_string())
+        }
+    }
+
+    /// List all usernames (unordered)
+    pub fn list_users(&self) -> Vec<String> {
+        self.credentials.keys().cloned().collect()
+    }
+
+    /// Export a copy of credentials for secure persistence (username -> password)
+    /// Note: These are the currently stored values used for authentication.
+    pub fn export_credentials(&self) -> HashMap<String, String> {
+        self.credentials.clone()
+    }
+
+    /// Replace all credentials with the provided map (used when loading from persistence)
+    pub fn import_credentials(&mut self, creds: HashMap<String, String>) {
+        self.credentials = creds;
     }
 }
 
@@ -128,7 +178,8 @@ impl Authenticator for BasicAuthenticator {
         Ok(self
             .credentials
             .get(username)
-            .is_some_and(|stored_password| stored_password == password))
+            .map(|stored| Self::verify_password(password, stored))
+            .unwrap_or(false))
     }
 }
 
@@ -136,6 +187,8 @@ impl Authenticator for BasicAuthenticator {
 mod tests {
     use super::*;
     use chrono::Utc;
+    use ring::pbkdf2 as ring_pbkdf2;
+    use std::num::NonZeroU32;
 
     #[test]
     fn test_basic_authenticator_creation() {
@@ -157,14 +210,15 @@ mod tests {
         authenticator.add_user("admin", "admin_pass");
 
         assert_eq!(authenticator.credentials.len(), 2);
-        assert_eq!(
-            authenticator.credentials.get("test_user"),
-            Some(&"test_password".to_string())
-        );
-        assert_eq!(
-            authenticator.credentials.get("admin"),
-            Some(&"admin_pass".to_string())
-        );
+        // Stored values should be hashed (argon2 encoded string starts with "$argon2")
+        assert!(authenticator
+            .credentials
+            .get("test_user")
+            .is_some_and(|v| v.starts_with("$argon2")));
+        assert!(authenticator
+            .credentials
+            .get("admin")
+            .is_some_and(|v| v.starts_with("$argon2")));
     }
 
     #[test]
@@ -174,11 +228,10 @@ mod tests {
         authenticator.add_user("user", "old_password");
         authenticator.add_user("user", "new_password");
 
-        assert_eq!(authenticator.credentials.len(), 1);
-        assert_eq!(
-            authenticator.credentials.get("user"),
-            Some(&"new_password".to_string())
-        );
+    assert_eq!(authenticator.credentials.len(), 1);
+    // Should be a new hashed value (not equal to plaintext)
+    let stored = authenticator.credentials.get("user").unwrap();
+    assert!(stored.starts_with("$argon2"));
     }
 
     #[test]
@@ -473,5 +526,160 @@ mod tests {
                 .authenticate(" spaced user ", " spaced pass ")
                 .unwrap()
         );
+    }
+
+    #[test]
+    fn test_upgrade_plaintext_to_argon2_on_login() {
+        // make hashing faster for test
+        BasicAuthenticator::set_hashing_work_factor(1000);
+
+        let mut auth = BasicAuthenticator::new();
+        // Seed legacy plaintext credential via import API
+        let mut map = std::collections::HashMap::new();
+        map.insert("legacy_user".to_string(), "legacy_pass".to_string());
+        auth.import_credentials(map);
+
+        // Authenticate should work with plaintext (legacy support)
+        assert!(auth.authenticate("legacy_user", "legacy_pass").unwrap());
+
+        // Trigger transparent upgrade
+        let upgraded = auth.upgrade_password_if_legacy("legacy_user", "legacy_pass");
+        assert!(upgraded, "Expected upgrade to occur for plaintext");
+
+        // Ensure stored hash is now Argon2
+        let stored = auth.export_credentials().get("legacy_user").cloned().unwrap();
+        assert!(stored.starts_with("$argon2"));
+
+        // Verify authentication still works with new hash
+        assert!(auth.authenticate("legacy_user", "legacy_pass").unwrap());
+    }
+
+    #[test]
+    fn test_upgrade_pbkdf2_to_argon2_on_login() {
+        // make hashing faster for test
+        BasicAuthenticator::set_hashing_work_factor(1000);
+
+        // Build a PBKDF2 encoded string compatible with verify_password
+        let username = "pb_user";
+        let password = "pb_pass";
+        let iter: u32 = 1000;
+        let n_iter = NonZeroU32::new(iter).unwrap();
+        let salt: [u8; 16] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
+        let mut dk = [0u8; 32];
+        ring_pbkdf2::derive(ring_pbkdf2::PBKDF2_HMAC_SHA256, n_iter, &salt, password.as_bytes(), &mut dk);
+        let stored = format!(
+            "{}{}${}${}",
+            BasicAuthenticator::HASH_PREFIX_PBKDF2,
+            iter,
+            hex::encode(salt),
+            hex::encode(dk)
+        );
+
+        let mut auth = BasicAuthenticator::new();
+        let mut map = std::collections::HashMap::new();
+        map.insert(username.to_string(), stored);
+        auth.import_credentials(map);
+
+        // Authenticate should work with PBKDF2 legacy format
+        assert!(auth.authenticate(username, password).unwrap());
+
+        // Trigger transparent upgrade
+        let upgraded = auth.upgrade_password_if_legacy(username, password);
+        assert!(upgraded, "Expected upgrade to occur for PBKDF2");
+
+        // Ensure stored hash is now Argon2
+        let stored_new = auth.export_credentials().get(username).cloned().unwrap();
+        assert!(stored_new.starts_with("$argon2"));
+
+        // Verify authentication still works with new hash
+        assert!(auth.authenticate(username, password).unwrap());
+    }
+}
+
+// =====================
+// Hashing implementation (Argon2 + 旧形式互換検証)
+// =====================
+impl BasicAuthenticator {
+    const HASH_PREFIX_PBKDF2: &'static str = "pbkdf2$";
+
+    /// テスト・ベンチ向け: Argon2 パラメータを動的調整
+    pub fn set_hashing_params(m_cost_kib: u32, t_cost: u32, p_cost: u32) {
+        // 下限をある程度設ける（256KiB, t>=1, p>=1）
+        M_COST_KIB.store(m_cost_kib.max(256), Ordering::Relaxed);
+        T_COST.store(t_cost.max(1), Ordering::Relaxed);
+        P_COST.store(p_cost.max(1), Ordering::Relaxed);
+    }
+
+    /// 互換API: 旧 set_hashing_work_factor。Argon2では time cost/メモリにマップ。
+    pub fn set_hashing_work_factor(_iter: u32) {
+        // テスト高速化用にかなり軽量な設定へ。
+        // 既存テストが 1000 を指定する前提で、t=1, m=256KiB, p=1 とする。
+        // （旧PBKDF2より高速化したいが、完全に0にはしない）
+        Self::set_hashing_params(256, 1, 1);
+    }
+
+    fn current_argon2() -> Argon2<'static> {
+        let m = M_COST_KIB.load(Ordering::Relaxed);
+        let t = T_COST.load(Ordering::Relaxed);
+        let p = P_COST.load(Ordering::Relaxed);
+        let params = Params::new(m, t, p, None).unwrap_or_else(|_| Params::default());
+        Argon2::new(Algorithm::Argon2id, Version::V0x13, params)
+    }
+
+    fn hash_password(password: &str) -> String {
+        let salt = SaltString::generate(rand::thread_rng());
+        let argon2 = Self::current_argon2();
+        let hash = argon2
+            .hash_password(password.as_bytes(), &salt)
+            .expect("argon2 hash failure")
+            .to_string();
+        hash
+    }
+
+    fn verify_password(password: &str, stored: &str) -> bool {
+        if stored.starts_with("$argon2") {
+            if let Ok(ph) = PasswordHash::new(stored) {
+                return Self::current_argon2()
+                    .verify_password(password.as_bytes(), &ph)
+                    .is_ok();
+            }
+            return false;
+        }
+
+        if let Some(rest) = stored.strip_prefix(Self::HASH_PREFIX_PBKDF2) {
+            // format: pbkdf2$ITER$SALT_HEX$DK_HEX
+            let parts: Vec<&str> = rest.split('$').collect();
+            if parts.len() != 3 {
+                return false;
+            }
+            let iter: u32 = match parts[0].parse() { Ok(v) => v, Err(_) => return false };
+            let salt = match hex::decode(parts[1]) { Ok(v) => v, Err(_) => return false };
+            let dk = match hex::decode(parts[2]) { Ok(v) => v, Err(_) => return false };
+            let n_iter = match NonZeroU32::new(iter) { Some(v) => v, None => return false };
+            ring::pbkdf2::verify(
+                ring::pbkdf2::PBKDF2_HMAC_SHA256,
+                n_iter,
+                &salt,
+                password.as_bytes(),
+                &dk,
+            )
+            .is_ok()
+        } else {
+            // Legacy plaintext comparison for backward compatibility
+            stored == password
+        }
+    }
+
+    /// ログイン後の透明移行: 平文または PBKDF2 なら Argon2 に再ハッシュして保存
+    pub fn upgrade_password_if_legacy(&mut self, username: &str, password: &str) -> bool {
+        if let Some(stored) = self.credentials.get(username).cloned() {
+            let is_legacy = !stored.starts_with("$argon2");
+            if is_legacy && Self::verify_password(&password, &stored) {
+                let new_hash = Self::hash_password(password);
+                self.credentials.insert(username.to_string(), new_hash);
+                return true;
+            }
+        }
+        false
     }
 }

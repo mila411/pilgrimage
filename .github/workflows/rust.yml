@@ -83,110 +83,110 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./cobertura.xml
 
-  publish:
-    runs-on: ubuntu-latest
-    needs: test
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+  # publish:
+  #   runs-on: ubuntu-latest
+  #   needs: test
+  #   if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
-    steps:
-      - uses: actions/checkout@v4
+  #   steps:
+  #     - uses: actions/checkout@v4
 
-      - name: Check for NONE in commit message
-        id: check_none
-        run: |
-          if git log -1 --pretty=%B | grep -q "NONE"; then
-            echo "skip_version_bump=true" >> $GITHUB_ENV
-          else
-            echo "skip_version_bump=false" >> $GITHUB_ENV
-          fi
+  #     - name: Check for NONE in commit message
+  #       id: check_none
+  #       run: |
+  #         if git log -1 --pretty=%B | grep -q "NONE"; then
+  #           echo "skip_version_bump=true" >> $GITHUB_ENV
+  #         else
+  #           echo "skip_version_bump=false" >> $GITHUB_ENV
+  #         fi
 
-      - name: Install nightly Rust (2024 Edition)
-        if: env.skip_version_bump == 'false'
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: nightly
-          target: x86_64-unknown-linux-gnu
-          override: true
+  #     - name: Install nightly Rust (2024 Edition)
+  #       if: env.skip_version_bump == 'false'
+  #       uses: actions-rs/toolchain@v1
+  #       with:
+  #         toolchain: nightly
+  #         target: x86_64-unknown-linux-gnu
+  #         override: true
 
-      - name: Bump version and create Git tag
-        if: env.skip_version_bump == 'false'
-        id: bump_version
-        run: |
-          # Get the latest commit message
-          COMMITS=$(git log --format=%B -n 1)
+  #     - name: Bump version and create Git tag
+  #       if: env.skip_version_bump == 'false'
+  #       id: bump_version
+  #       run: |
+  #         # Get the latest commit message
+  #         COMMITS=$(git log --format=%B -n 1)
 
-          # Initial value for version bump
-          BUMP="patch"
+  #         # Initial value for version bump
+  #         BUMP="patch"
 
-          # Determine the version based on the commit message
-          if echo "$COMMITS" | grep -q "BREAKING CHANGE"; then
-            BUMP="major"
-          elif echo "$COMMITS" | grep -q "^feat"; then
-            BUMP="minor"
-          elif echo "$COMMITS" | grep -q "^fix"; then
-            BUMP="patch"
-          fi
+  #         # Determine the version based on the commit message
+  #         if echo "$COMMITS" | grep -q "BREAKING CHANGE"; then
+  #           BUMP="major"
+  #         elif echo "$COMMITS" | grep -q "^feat"; then
+  #           BUMP="minor"
+  #         elif echo "$COMMITS" | grep -q "^fix"; then
+  #           BUMP="patch"
+  #         fi
 
-          echo "Determined version bump: $BUMP"
+  #         echo "Determined version bump: $BUMP"
 
-          # Get the current version
-          CURRENT_VERSION=$(grep '^version' Cargo.toml | awk -F\" '{print $2}')
-          echo "Current version: $CURRENT_VERSION"
+  #         # Get the current version
+  #         CURRENT_VERSION=$(grep '^version' Cargo.toml | awk -F\" '{print $2}')
+  #         echo "Current version: $CURRENT_VERSION"
 
-          # Calculate the new version
-          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
-          if [ "$BUMP" = "major" ]; then
-            MAJOR=$((MAJOR + 1))
-            MINOR=0
-            PATCH=0
-          elif [ "$BUMP" = "minor" ]; then
-            MINOR=$((MINOR + 1))
-            PATCH=0
-          elif [ "$BUMP" = "patch" ]; then
-            PATCH=$((PATCH + 1))
-          fi
-          NEW_VERSION="$MAJOR.$MINOR.$PATCH"
-          echo "New version: $NEW_VERSION"
+  #         # Calculate the new version
+  #         IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
+  #         if [ "$BUMP" = "major" ]; then
+  #           MAJOR=$((MAJOR + 1))
+  #           MINOR=0
+  #           PATCH=0
+  #         elif [ "$BUMP" = "minor" ]; then
+  #           MINOR=$((MINOR + 1))
+  #           PATCH=0
+  #         elif [ "$BUMP" = "patch" ]; then
+  #           PATCH=$((PATCH + 1))
+  #         fi
+  #         NEW_VERSION="$MAJOR.$MINOR.$PATCH"
+  #         echo "New version: $NEW_VERSION"
 
-          # Update the version of Cargo.toml
-          sed -i "s/^version = \".*\"/version = \"$NEW_VERSION\"/" Cargo.toml
+  #         # Update the version of Cargo.toml
+  #         sed -i "s/^version = \".*\"/version = \"$NEW_VERSION\"/" Cargo.toml
 
-          # Update Cargo.lock
-          cargo check
+  #         # Update Cargo.lock
+  #         cargo check
 
-          # Git settings
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+  #         # Git settings
+  #         git config user.name "github-actions[bot]"
+  #         git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          # Commit changes
-          git add Cargo.toml Cargo.lock
-          git commit -m "Bump version to $NEW_VERSION" || echo "No changes to commit"
+  #         # Commit changes
+  #         git add Cargo.toml Cargo.lock
+  #         git commit -m "Bump version to $NEW_VERSION" || echo "No changes to commit"
 
-          # Create a tag
-          git tag "v$NEW_VERSION"
+  #         # Create a tag
+  #         git tag "v$NEW_VERSION"
 
-          # Output a new version to GitHub Actions
-          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+  #         # Output a new version to GitHub Actions
+  #         echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
 
-      - name: Push changes and tags
-        if: env.skip_version_bump == 'false'
-        run: git push origin main --tags
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  #     - name: Push changes and tags
+  #       if: env.skip_version_bump == 'false'
+  #       run: git push origin main --tags
+  #       env:
+  #         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Create GitHub Release
-        if: env.skip_version_bump == 'false'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release create "v${{ steps.bump_version.outputs.new_version }}" \
-            --title "v${{ steps.bump_version.outputs.new_version }}" \
-            --notes "Release version v${{ steps.bump_version.outputs.new_version }}" \
-            --generate-notes
+  #     - name: Create GitHub Release
+  #       if: env.skip_version_bump == 'false'
+  #       env:
+  #         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  #       run: |
+  #         gh release create "v${{ steps.bump_version.outputs.new_version }}" \
+  #           --title "v${{ steps.bump_version.outputs.new_version }}" \
+  #           --notes "Release version v${{ steps.bump_version.outputs.new_version }}" \
+  #           --generate-notes
 
-      - name: Publish to crates.io
-        if: env.skip_version_bump == 'false'
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: cargo publish
-        # run: cargo publish --allow-dirty
+  #     - name: Publish to crates.io
+  #       if: env.skip_version_bump == 'false'
+  #       env:
+  #         CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+  #       run: cargo publish
+  #       # run: cargo publish --allow-dirty

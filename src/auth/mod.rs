@@ -63,6 +63,7 @@
 pub mod audit;
 pub mod authentication;
 pub mod authorization;
+pub mod cred_store;
 pub mod jwt_auth;
 pub mod token;
 pub mod cli_auth;

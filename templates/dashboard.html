@@ -341,45 +341,6 @@
             🔄 Refresh All
           </button>
         </div>
-
-        <div class="dashboard-card" style="margin-top: 20px">
-          <h3>🛡️ Security - Create User</h3>
-          <div
-            style="
-              display: flex;
-              gap: 10px;
-              flex-wrap: wrap;
-              align-items: center;
-            "
-          >
-            <input
-              id="dash-new-username"
-              class="login-input"
-              placeholder="username"
-              style="width: 160px"
-            />
-            <input
-              id="dash-new-password"
-              type="password"
-              class="login-input"
-              placeholder="password"
-              style="width: 160px"
-            />
-            <select id="dash-new-role" class="login-input" style="width: 140px">
-              <option value="user">User</option>
-              <option value="viewer">Viewer</option>
-              <option value="admin">Admin</option>
-            </select>
-            <button class="refresh-button" onclick="dashCreateUser()">
-              🆕 Create
-            </button>
-          </div>
-          <div
-            id="dash-create-user-result"
-            class="loading"
-            style="text-align: left"
-          ></div>
-        </div>
       </div>
     </div>
 
@@ -712,6 +673,7 @@
             "/console",
             "/dashboard",
             "/health",
+            "/api/cluster-health", // public in server
           ];
           const isPublicEndpoint = publicEndpoints.some((endpoint) =>
             url.startsWith(endpoint)
@@ -738,24 +700,24 @@
             `Response status: ${response.status}, ok: ${response.ok}`
           );
 
-          // Handle authentication errors
+          // Handle authentication errors (do NOT auto-logout on 401)
           if (response.status === 401) {
-            console.log("401 error received for:", url);
-            // Only count refresh errors for automated requests
+            console.warn(
+              "401 received; preserving session to avoid auto-logout on reload.",
+              url
+            );
+            // Count and optionally stop auto refresh, but do not clear session
             if (!isPublicEndpoint && isRefreshing) {
               refreshErrorCount++;
-              console.log(
-                `Refresh error count: ${refreshErrorCount}/${MAX_REFRESH_ERRORS}`
-              );
               if (refreshErrorCount >= MAX_REFRESH_ERRORS) {
-                console.log("Too many refresh errors, logging out");
-                handleLogout();
+                console.log("Too many refresh errors, stopping auto-refresh");
+                stopAutoRefresh();
               }
             }
             return {
               ok: false,
               status: response.status,
-              body: "Authentication required. Please login again.",
+              body: "Authentication required.",
             };
           }
 
@@ -986,40 +948,6 @@
         const sizes = ["B", "KB", "MB", "GB"];
         const i = Math.floor(Math.log(bytes) / Math.log(k));
         return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + sizes[i];
-      }
-
-      // ===== Security: Create User (admin only) =====
-      async function dashCreateUser() {
-        const username = document
-          .getElementById("dash-new-username")
-          .value.trim();
-        const password = document
-          .getElementById("dash-new-password")
-          .value.trim();
-        const role = document.getElementById("dash-new-role").value;
-        const out = document.getElementById("dash-create-user-result");
-
-        if (!authToken) {
-          out.textContent = "Please login first";
-          return;
-        }
-        if (!username || !password) {
-          out.textContent = "Username and password are required";
-          return;
-        }
-
-        const res = await makeRequest("/security/create-user", "POST", {
-          username,
-          password,
-          role,
-        });
-        if (res.ok) {
-          out.textContent = `User '${username}' created with role '${role}'`;
-          out.style.color = "#e5e7eb";
-        } else {
-          out.textContent = `Failed: ${res.body}`;
-          out.style.color = "#fca5a5";
-        }
       }
     </script>
   </body>

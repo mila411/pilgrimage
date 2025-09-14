@@ -151,6 +151,9 @@ async fn test_security_performance() {
     let key = [1u8; 32];
     let encryptor = Encryptor::new(&key);
 
+    // Lower PBKDF2 work factor to keep this performance test fast
+    BasicAuthenticator::set_hashing_work_factor(1_000);
+
     // Measure authentication performance
     let start = Instant::now();
     for i in 0..50 {

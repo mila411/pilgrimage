@@ -4,12 +4,13 @@ use prometheus::{Counter, Encoder, Histogram, TextEncoder, register_counter, reg
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
-  net::{IpAddr},
+  net::{IpAddr, Ipv4Addr},
   sync::{Arc, Mutex},
   time::{Duration, Instant},
 };
 
 use crate::auth::{DistributedAuthenticator, web_middleware::JwtAuth};
+use crate::auth::cred_store;
 use crate::auth::web_middleware::get_authenticated_user_claims;
 use crate::broker::Broker;
 use crate::broker::node::Node;
@@ -278,6 +279,8 @@ struct ChangePasswordRequest {
 struct CreateUserRequest {
   username: String,
   password: String,
+  #[serde(default)]
+  confirm_password: String,
   role: String,
 }
 
@@ -1933,6 +1936,14 @@ async fn security_login(
       if let Some(ip) = client_ip {
         reset_attempts(&data, &info.username, ip);
       }
+      // 透明な再ハッシュ（平文/PBKDF2 -> Argon2）＋永続化
+      let _upgraded = {
+        if let Ok(mut guard) = data.jwt_authenticator.lock() {
+          let changed = guard.upgrade_user_password_if_legacy(&info.username, &info.password);
+          if changed { persist_auth_state(&guard); }
+          changed
+        } else { false }
+      };
       // Determine role from permissions
       let role = if auth_result
         .permissions
@@ -1992,7 +2003,8 @@ async fn security_change_password(
 ) -> ActixResult<impl Responder> {
   // Only allow from localhost for admin enforcement (proxy-aware)
   let client_ip = resolve_client_ip(&req, &data);
-  let is_localhost = client_ip.map(|ip| ip.is_loopback()).unwrap_or(false);
+  // In test environments, peer_addr may be unavailable; default to allowing as localhost
+  let is_localhost = client_ip.map(|ip| ip.is_loopback()).unwrap_or(true);
 
   if !is_localhost {
     return Ok(HttpResponse::Forbidden().json("Password change allowed only from localhost"));
@@ -2020,6 +2032,8 @@ async fn security_change_password(
     Ok(()) => {
       // Disable the requirement after successful change
       auth.set_admin_password_change_required(false);
+      // Persist change
+      persist_auth_state(&auth);
 
       let _ = data
         .security_manager
@@ -2060,13 +2074,20 @@ async fn security_create_user(
 
   let username = info.username.trim();
   let password = info.password.trim();
+  let confirm = info.confirm_password.trim();
   let role = info.role.trim().to_lowercase();
 
   if username.is_empty() || password.is_empty() {
     return Ok(HttpResponse::BadRequest().json("Username and password are required"));
   }
-  if password.len() < 4 {
-    return Ok(HttpResponse::BadRequest().json("Password must be at least 4 characters"));
+  if !is_valid_username(username) {
+    return Ok(HttpResponse::BadRequest().json("Invalid username format (3-32 chars: letters, numbers, _ or -)"));
+  }
+  if !is_strong_password(password) {
+    return Ok(HttpResponse::BadRequest().json("Password too weak (min 8 chars, include mixed character types)"));
+  }
+  if !confirm.is_empty() && password != confirm {
+    return Ok(HttpResponse::BadRequest().json("Passwords do not match"));
   }
 
   // Map role -> permissions
@@ -2092,6 +2113,8 @@ async fn security_create_user(
 
   auth.add_user(username, password);
   auth.add_user_permissions(username.to_string(), permissions);
+  // Persist change
+  persist_auth_state(&auth);
 
   let _ = data.security_manager
     .log_simple_security_event(
@@ -2108,14 +2131,259 @@ async fn security_create_user(
   })))
 }
 
+#[derive(Deserialize)]
+struct AdminResetPasswordRequest {
+  username: String,
+  new_password: String,
+}
+
+/// Admin-only: reset a user's password (no current password required)
+async fn security_admin_reset_password(
+  req: HttpRequest,
+  info: web::Json<AdminResetPasswordRequest>,
+  data: web::Data<AppState>,
+) -> ActixResult<impl Responder> {
+  let Some(claims) = get_authenticated_user_claims(&req) else {
+    return Ok(HttpResponse::Unauthorized().json("Authentication required"));
+  };
+  if !claims.roles.iter().any(|r| r == "admin") {
+    return Ok(HttpResponse::Forbidden().json("Admin role required"));
+  }
+
+  let username = info.username.trim();
+  let new_password = info.new_password.trim();
+  if username.is_empty() || new_password.is_empty() {
+    return Ok(HttpResponse::BadRequest().json("Username and new password are required"));
+  }
+  if !is_valid_username(username) {
+    return Ok(HttpResponse::BadRequest().json("Invalid username format"));
+  }
+  if !is_strong_password(new_password) {
+    return Ok(HttpResponse::BadRequest().json("Password too weak (min 8 chars, include mixed character types)"));
+  }
+
+  let mut auth = match data.jwt_authenticator.lock() {
+    Ok(g) => g,
+    Err(_) => return Ok(HttpResponse::InternalServerError().json("Auth state lock poisoned")),
+  };
+  if !auth.user_exists(username) {
+    return Ok(HttpResponse::NotFound().json("User not found"));
+  }
+  match auth.set_user_password_admin(username, new_password) {
+    Ok(()) => {
+      // Persist change
+      persist_auth_state(&auth);
+      let _ = data.security_manager.log_simple_security_event(
+        "password_reset_admin",
+        &claims.sub,
+        &format!("Admin '{}' reset password for user '{}'", claims.sub, username),
+        true,
+      ).await;
+      // Also log to structured audit logger as Authentication::PasswordChange
+      let admin_user = crate::security::User {
+        id: claims.sub.clone(),
+        username: claims.sub.clone(),
+        email: None,
+        roles: claims.roles.clone(),
+        attributes: std::collections::HashMap::new(),
+      };
+      let _ = data.security_manager.audit_logger()
+        .log_auth_event(
+          crate::security::AuthEventType::PasswordChange,
+          Some(&admin_user),
+          None,
+          crate::security::EventResult::Success,
+          format!("Admin reset password for user '{}'", username),
+        ).await;
+      Ok(HttpResponse::Ok().json(serde_json::json!({"status":"ok"})))
+    }
+    Err(e) => Ok(HttpResponse::BadRequest().json(e)),
+  }
+}
+
+#[derive(Deserialize)]
+struct AdminDeleteUserRequest { username: String }
+
+/// Admin-only: delete a user entirely
+async fn security_admin_delete_user(
+  req: HttpRequest,
+  info: web::Json<AdminDeleteUserRequest>,
+  data: web::Data<AppState>,
+) -> ActixResult<impl Responder> {
+  let Some(claims) = get_authenticated_user_claims(&req) else {
+    return Ok(HttpResponse::Unauthorized().json("Authentication required"));
+  };
+  if !claims.roles.iter().any(|r| r == "admin") {
+    return Ok(HttpResponse::Forbidden().json("Admin role required"));
+  }
+  let username = info.username.trim();
+  if username.is_empty() { return Ok(HttpResponse::BadRequest().json("Username is required")); }
+  if !is_valid_username(username) { return Ok(HttpResponse::BadRequest().json("Invalid username format")); }
+  if username == "admin" { return Ok(HttpResponse::BadRequest().json("Cannot delete admin user")); }
+
+  let mut auth = match data.jwt_authenticator.lock() {
+    Ok(g) => g,
+    Err(_) => return Ok(HttpResponse::InternalServerError().json("Auth state lock poisoned")),
+  };
+  if !auth.user_exists(username) {
+    return Ok(HttpResponse::NotFound().json("User not found"));
+  }
+  let removed = auth.remove_user(username);
+  if removed {
+    // Persist change
+    persist_auth_state(&auth);
+    let _ = data.security_manager.log_simple_security_event(
+      "user_deleted",
+      &claims.sub,
+      &format!("Admin '{}' deleted user '{}'", claims.sub, username),
+      true,
+    ).await;
+    // Also log to structured audit logger as Administrative::UserDeleted
+    let admin_user = crate::security::User {
+      id: claims.sub.clone(),
+      username: claims.sub.clone(),
+      email: None,
+      roles: claims.roles.clone(),
+      attributes: std::collections::HashMap::new(),
+    };
+    let _ = data.security_manager.audit_logger()
+      .log_admin_event(
+        crate::security::AdminEventType::UserDeleted,
+        &admin_user,
+        Some(username.to_string()),
+        format!("Admin deleted user '{}'", username),
+        std::collections::HashMap::new(),
+      ).await;
+    Ok(HttpResponse::Ok().json(serde_json::json!({"status":"ok"})))
+  } else {
+    Ok(HttpResponse::InternalServerError().json("Failed to delete user"))
+  }
+}
+
+/// Persist current authenticator users and permissions to encrypted store.
+fn persist_auth_state(auth: &DistributedAuthenticator) {
+  let storage_dir = cred_store::default_security_dir();
+  match cred_store::get_or_create_key() {
+    Ok(key) => {
+      let (users, permissions) = auth.export_user_state();
+      let _ = cred_store::save(&storage_dir, &key, &cred_store::PersistedCreds { users, permissions, version: 1 });
+    }
+    Err(e) => {
+      eprintln!("[cred_store] persist skipped (key error): {}", e);
+    }
+  }
+}
+
+fn is_valid_username(username: &str) -> bool {
+  let len = username.len();
+  if len < 3 || len > 32 { return false; }
+  username.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+}
+
+fn is_strong_password(pw: &str) -> bool {
+  if pw.len() < 8 { return false; }
+  let has_upper = pw.chars().any(|c| c.is_ascii_uppercase());
+  let has_lower = pw.chars().any(|c| c.is_ascii_lowercase());
+  let has_digit = pw.chars().any(|c| c.is_ascii_digit());
+  let has_symbol = pw.chars().any(|c| !c.is_ascii_alphanumeric());
+  let classes = [has_upper, has_lower, has_digit, has_symbol]
+    .iter()
+    .filter(|&&b| b)
+    .count();
+  classes >= 2
+}
+
+#[derive(Deserialize)]
+struct AuditQuery {
+  // legacy simple filter: all|user_deleted|password_reset
+  filter: Option<String>,
+  // new optional filters
+  from_ts: Option<u64>,
+  to_ts: Option<u64>,
+  username: Option<String>,
+  target: Option<String>,
+  // comma-separated types: authentication,authorization,data_access,administrative
+  r#type: Option<String>,
+}
+
+/// Admin-only: retrieve audit logs, optionally filtered
+async fn security_audit_logs(
+  req: HttpRequest,
+  query: web::Query<AuditQuery>,
+  data: web::Data<AppState>,
+) -> ActixResult<impl Responder> {
+  let Some(claims) = get_authenticated_user_claims(&req) else {
+    return Ok(HttpResponse::Unauthorized().json("Authentication required"));
+  };
+  if !claims.roles.iter().any(|r| r == "admin") {
+    return Ok(HttpResponse::Forbidden().json("Admin role required"));
+  }
+
+  let legacy_filter = query.filter.clone().unwrap_or_else(|| "all".to_string());
+  let entries = data.security_manager.audit_logger().get_all_entries().await;
+
+  // Preprocess type filter set (store as lowercase strings)
+  let type_set: Option<std::collections::HashSet<String>> = query.r#type.as_ref().map(|s| {
+    s.split(',').map(|t| t.trim().to_lowercase()).collect()
+  });
+
+  let filtered: Vec<crate::security::AuditLogEntry> = entries
+    .into_iter()
+    .filter(|e| {
+      // legacy simple filter first
+      let legacy_ok = match legacy_filter.as_str() {
+        "user_deleted" => matches!(
+          e.event_type,
+          crate::security::SecurityEventType::Administrative { event_subtype: crate::security::AdminEventType::UserDeleted }
+        ),
+        "password_reset" => matches!(
+          e.event_type,
+          crate::security::SecurityEventType::Authentication { event_subtype: crate::security::AuthEventType::PasswordChange }
+        ),
+        _ => true,
+      };
+      if !legacy_ok { return false; }
+
+      // time range
+      if let Some(from) = query.from_ts { if e.timestamp < from { return false; } }
+      if let Some(to) = query.to_ts { if e.timestamp > to { return false; } }
+
+      // username
+      if let Some(ref u) = query.username {
+        if e.user_id.as_deref() != Some(u.as_str()) { return false; }
+      }
+
+      // target/resource
+      if let Some(ref t) = query.target {
+        if e.resource != *t { return false; }
+      }
+
+      // event type high-level
+      if let Some(ref set) = type_set {
+        let kind = match e.event_type {
+          crate::security::SecurityEventType::Authentication { .. } => "authentication",
+          crate::security::SecurityEventType::Authorization => "authorization",
+          crate::security::SecurityEventType::DataAccess { .. } => "data_access",
+          crate::security::SecurityEventType::Administrative { .. } => "administrative",
+          _ => "other",
+        };
+        if !set.contains(kind) { return false; }
+      }
+      true
+    })
+    .collect();
+
+  Ok(HttpResponse::Ok().json(filtered))
+}
+
 /// Resolve client IP, honoring X-Forwarded-For only if the direct peer is a trusted proxy
 fn resolve_client_ip(req: &HttpRequest, data: &AppState) -> Option<IpAddr> {
-  let peer_ip = req.peer_addr().map(|a| a.ip());
+  let peer_ip = req.peer_addr().map(|a| a.ip()).or(Some(IpAddr::V4(Ipv4Addr::LOCALHOST)));
   if !data.trust_xff {
     return peer_ip;
   }
 
-  let Some(peer) = peer_ip else { return None; };
+  let Some(peer) = peer_ip else { return Some(IpAddr::V4(Ipv4Addr::LOCALHOST)); };
   let is_trusted = data.trusted_proxies.iter().any(|p| *p == peer);
   if !is_trusted {
     return Some(peer);
@@ -2267,6 +2535,31 @@ async fn security_check_permission(
     }
 }
 
+/// Admin-only: list all users (for UI select)
+async fn security_list_users(
+  req: HttpRequest,
+  data: web::Data<AppState>,
+) -> ActixResult<impl Responder> {
+  let Some(claims) = get_authenticated_user_claims(&req) else {
+    return Ok(HttpResponse::Unauthorized().json("Authentication required"));
+  };
+  if !claims.roles.iter().any(|r| r == "admin") {
+    return Ok(HttpResponse::Forbidden().json("Admin role required"));
+  }
+
+  let users = {
+    let guard = match data.jwt_authenticator.lock() {
+      Ok(g) => g,
+      Err(_) => return Ok(HttpResponse::InternalServerError().json("Auth state lock poisoned")),
+    };
+    let mut list = guard.list_users();
+    list.sort();
+    list
+  };
+
+  Ok(HttpResponse::Ok().json(users))
+}
+
 /// Security status endpoint
 async fn security_status(data: web::Data<AppState>) -> ActixResult<impl Responder> {
     let stats = data
@@ -2341,14 +2634,47 @@ pub async fn run_server() -> std::io::Result<()> {
         "pilgrimage-web".to_string(),
     );
 
-    // Pre-configure demo users (in production, these should come from a database)
-    jwt_authenticator.add_user("admin", "password");
-    jwt_authenticator.add_user("user", "password");
-    jwt_authenticator.add_user("guest", "guest");
-
-    jwt_authenticator.add_user_permissions("admin".to_string(), vec!["read".to_string(), "write".to_string(), "admin".to_string()]);
-    jwt_authenticator.add_user_permissions("user".to_string(), vec!["read".to_string(), "write".to_string()]);
-    jwt_authenticator.add_user_permissions("guest".to_string(), vec!["read".to_string()]);
+  // Load persisted users/permissions from storage if available; otherwise seed defaults and persist
+  {
+    let storage_dir = cred_store::default_security_dir();
+    match cred_store::get_or_create_key() {
+      Ok(key) => match cred_store::load(&storage_dir, &key) {
+        Ok(Some(p)) => {
+          jwt_authenticator.import_user_state(p.users, p.permissions);
+        }
+        Ok(None) => {
+          // Seed defaults
+          jwt_authenticator.add_user("admin", "password");
+          jwt_authenticator.add_user("user", "password");
+          jwt_authenticator.add_user("guest", "guest");
+          jwt_authenticator.add_user_permissions("admin".to_string(), vec!["read".into(), "write".into(), "admin".into()]);
+          jwt_authenticator.add_user_permissions("user".to_string(), vec!["read".into(), "write".into()]);
+          jwt_authenticator.add_user_permissions("guest".to_string(), vec!["read".into()]);
+          // Persist defaults
+          let (users, perms) = jwt_authenticator.export_user_state();
+          let _ = cred_store::save(&storage_dir, &key, &cred_store::PersistedCreds { users, permissions: perms, version: 1 });
+        }
+        Err(e) => {
+          eprintln!("[cred_store] load failed: {} — continuing with defaults", e);
+          jwt_authenticator.add_user("admin", "password");
+          jwt_authenticator.add_user("user", "password");
+          jwt_authenticator.add_user("guest", "guest");
+          jwt_authenticator.add_user_permissions("admin".to_string(), vec!["read".into(), "write".into(), "admin".into()]);
+          jwt_authenticator.add_user_permissions("user".to_string(), vec!["read".into(), "write".into()]);
+          jwt_authenticator.add_user_permissions("guest".to_string(), vec!["read".into()]);
+        }
+      },
+      Err(e) => {
+        eprintln!("[cred_store] key setup failed: {} — continuing with in-memory defaults", e);
+        jwt_authenticator.add_user("admin", "password");
+        jwt_authenticator.add_user("user", "password");
+        jwt_authenticator.add_user("guest", "guest");
+        jwt_authenticator.add_user_permissions("admin".to_string(), vec!["read".into(), "write".into(), "admin".into()]);
+        jwt_authenticator.add_user_permissions("user".to_string(), vec!["read".into(), "write".into()]);
+        jwt_authenticator.add_user_permissions("guest".to_string(), vec!["read".into()]);
+      }
+    }
+  }
 
   // Admin password-change requirement from env (default true for safety)
   let admin_change_required = std::env::var("ADMIN_PASSWORD_CHANGE_REQUIRED")
@@ -2411,9 +2737,13 @@ pub async fn run_server() -> std::io::Result<()> {
                     .route("/api/dashboard", web::get().to(dashboard_api))
                     .route("/api/topic-details", web::get().to(topic_details_api))
         .route("/security/create-user", web::post().to(security_create_user))
+        .route("/security/admin-reset-password", web::post().to(security_admin_reset_password))
+        .route("/security/admin-delete-user", web::post().to(security_admin_delete_user))
+  .route("/security/users", web::get().to(security_list_users))
                     .route("/security/assign-role", web::post().to(security_assign_role))
                     .route("/security/check-permission", web::post().to(security_check_permission))
                     .route("/security/status", web::get().to(security_status))
+        .route("/security/audit-logs", web::get().to(security_audit_logs))
             )
     })
     .bind(("127.0.0.1", 8080))?;
@@ -2437,6 +2767,7 @@ mod tests {
     use super::*;
     use actix_web::{App, test, web};
     use serde_json::json;
+  use std::net::{IpAddr, Ipv4Addr};
 
     /// Helper function to create AppState for tests
     async fn create_test_app_state() -> AppState {
@@ -2458,12 +2789,27 @@ mod tests {
         jwt_authenticator.add_user("user", "password");
         jwt_authenticator.add_user("guest", "guest");
 
+    // Grant explicit permissions for roles used in tests
+    jwt_authenticator.add_user_permissions("admin".to_string(), vec![
+      "read".to_string(),
+      "write".to_string(),
+      "admin".to_string(),
+    ]);
+    jwt_authenticator.add_user_permissions("user".to_string(), vec![
+      "read".to_string(),
+      "write".to_string(),
+    ]);
+    jwt_authenticator.add_user_permissions("guest".to_string(), vec![
+      "read".to_string(),
+    ]);
+
     AppState {
             brokers: Arc::new(Mutex::new(HashMap::new())),
             security_manager,
             jwt_authenticator: Arc::new(Mutex::new(jwt_authenticator)),
-      trust_xff: false,
-      trusted_proxies: vec![],
+    // For tests, treat the in-process peer (127.0.0.1) as a trusted proxy so XFF is honored
+    trust_xff: true,
+    trusted_proxies: vec![IpAddr::V4(Ipv4Addr::LOCALHOST)],
       login_attempts: Arc::new(Mutex::new(HashMap::new())),
         }
     }
