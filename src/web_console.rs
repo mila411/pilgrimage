@@ -1899,25 +1899,27 @@ async fn security_login(
         auth.is_admin_password_change_required()
       } else { false }
     };
-    if is_localhost && requires_change {
+    if requires_change {
       if auth_result_initial.success {
         // Credentials are correct but admin must change password first
         // Reset attempts on credential success (even though we require change)
-        if let Some(ip) = client_ip {
-          reset_attempts(&data, &info.username, ip);
-        }
-        let _ = data
-          .security_manager
+        if let Some(ip) = client_ip { reset_attempts(&data, &info.username, ip); }
+        let _ = data.security_manager
           .log_simple_security_event(
             "password_change_required",
             &info.username,
-            "Admin must change password on first localhost login",
+            if is_localhost { "Admin must change password on first localhost login" } else { "Admin must change password; remote attempt detected" },
             false,
-          )
-          .await;
+          ).await;
+        // If remote, add local_only flag to guide UI
         return Ok(HttpResponse::Forbidden().json(serde_json::json!({
           "change_required": true,
-          "message": "Admin must change password before first login from localhost"
+          "local_only": !is_localhost,
+          "message": if is_localhost {
+            "Admin must change password before first login from localhost"
+          } else {
+            "Admin initial password change must be performed from localhost. Please run on the server or via SSH and change the admin password."
+          }
         })));
       }
       // If credentials are wrong, fall through to standard unauthorized handling below

@@ -598,6 +598,12 @@
             try {
               const data = JSON.parse(result.body || "{}");
               if (data.change_required) {
+                if (data.local_only) {
+                  showLoginError(
+                    "初回パスワード変更はローカルホストからのみ実行可能です。サーバへ直接アクセス（またはSSHポートフォワーディング）して変更してください。"
+                  );
+                  return;
+                }
                 const newPwd = await getNewPasswordFromModal();
 
                 const chg = await makeRequest(
