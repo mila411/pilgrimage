@@ -30,15 +30,37 @@ impl PidManager {
     }
 
     /// Get the default PID file path for a broker
+    ///
+    /// On Unix systems, prefer /var/run only if it's writable by the current process.
+    /// Otherwise, fall back to the system temp directory (e.g. /tmp), which is
+    /// generally writable by non-root users. This avoids Permission denied errors
+    /// when running examples or dev binaries without sudo.
     fn get_pid_file_path(broker_id: &str) -> PathBuf {
-        // Use system temp directory or /var/run if available
-        let base_dir = if Path::new("/var/run").exists() && Path::new("/var/run").is_dir() {
-            PathBuf::from("/var/run")
-        } else {
-            std::env::temp_dir()
-        };
+        #[cfg(unix)]
+        {
+            let var_run = Path::new("/var/run");
+            if var_run.exists() && var_run.is_dir() {
+                // Try a lightweight writability probe
+                let probe_path = var_run.join(format!(".pilgrimage_write_probe_{}", process::id()));
+                let probe_result = std::fs::OpenOptions::new()
+                    .create(true)
+                    .write(true)
+                    .open(&probe_path);
+                match probe_result {
+                    Ok(_) => {
+                        // Clean up the probe file and use /var/run
+                        let _ = fs::remove_file(&probe_path);
+                        return var_run.join(format!("pilgrimage_broker_{}.pid", broker_id));
+                    }
+                    Err(_) => {
+                        // Not writable, fall through to temp dir
+                    }
+                }
+            }
+        }
 
-        base_dir.join(format!("pilgrimage_broker_{}.pid", broker_id))
+        // Default: use OS temp dir (e.g., /tmp on Unix, %TEMP% on Windows)
+        std::env::temp_dir().join(format!("pilgrimage_broker_{}.pid", broker_id))
     }
 
     /// Create and write the PID file

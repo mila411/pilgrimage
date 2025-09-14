@@ -40,6 +40,8 @@ pub struct DistributedAuthenticator {
     user_permissions: HashMap<String, Vec<String>>, // Add user permissions
     token_expiry_seconds: u64,
     issuer: String,
+    // Flag to require admin to change password on first localhost login
+    admin_password_change_required: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -69,6 +71,7 @@ impl DistributedAuthenticator {
             user_permissions: HashMap::new(), // Initialize user permissions
             token_expiry_seconds: 3600,       // 1 hour default
             issuer,
+            admin_password_change_required: false,
         }
     }
 
@@ -80,6 +83,11 @@ impl DistributedAuthenticator {
     /// Add a user for basic authentication
     pub fn add_user(&mut self, username: &str, password: &str) {
         self.basic_auth.add_user(username, password);
+    }
+
+    /// Check if a user exists
+    pub fn user_exists(&self, username: &str) -> bool {
+        self.basic_auth.has_user(username)
     }
 
     /// Add node with specific permissions
@@ -192,6 +200,26 @@ impl DistributedAuthenticator {
                 }
             }
         }
+    }
+
+    /// For admin password change policy
+    pub fn set_admin_password_change_required(&mut self, required: bool) {
+        self.admin_password_change_required = required;
+    }
+
+    pub fn is_admin_password_change_required(&self) -> bool {
+        self.admin_password_change_required
+    }
+
+    /// Change a user's password (verifies current password)
+    pub fn change_user_password(
+        &mut self,
+        username: &str,
+        current_password: &str,
+        new_password: &str,
+    ) -> Result<(), String> {
+        self.basic_auth
+            .change_password(username, current_password, new_password)
     }
 
     /// Validate a JWT token

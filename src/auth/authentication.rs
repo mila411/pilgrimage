@@ -81,6 +81,29 @@ impl BasicAuthenticator {
         self.credentials
             .insert(username.to_string(), password.to_string());
     }
+
+    /// Returns true if the user already exists in the credential store
+    pub fn has_user(&self, username: &str) -> bool {
+        self.credentials.contains_key(username)
+    }
+
+    /// Change an existing user's password by verifying the current password
+    pub fn change_password(
+        &mut self,
+        username: &str,
+        current_password: &str,
+        new_password: &str,
+    ) -> Result<(), String> {
+        match self.credentials.get(username) {
+            Some(stored) if stored == current_password => {
+                self.credentials
+                    .insert(username.to_string(), new_password.to_string());
+                Ok(())
+            }
+            Some(_) => Err("Invalid current password".to_string()),
+            None => Err("User not found".to_string()),
+        }
+    }
 }
 
 impl Default for BasicAuthenticator {

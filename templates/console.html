@@ -559,6 +559,36 @@ Hello from Pilgrimage Web Console!</textarea
               <button onclick="assignRole()">&#128101; Assign Role</button>
               <div id="role-result" class="result"></div>
             </div>
+
+            <div class="endpoint">
+              <h3>🆕 Create User</h3>
+              <div class="form-group">
+                <label>Username:</label>
+                <input
+                  type="text"
+                  id="new-username"
+                  placeholder="new username"
+                />
+              </div>
+              <div class="form-group">
+                <label>Password:</label>
+                <input
+                  type="password"
+                  id="new-password"
+                  placeholder="new password"
+                />
+              </div>
+              <div class="form-group">
+                <label>Role:</label>
+                <select id="new-role">
+                  <option value="user">User</option>
+                  <option value="viewer">Viewer</option>
+                  <option value="admin">Admin</option>
+                </select>
+              </div>
+              <button onclick="createUser()">🆕 Create User</button>
+              <div id="create-user-result" class="result"></div>
+            </div>
           </div>
         </div>
 
@@ -704,6 +734,7 @@ Hello from Pilgrimage Web Console!</textarea
           // Add JWT token to Authorization header for protected endpoints
           const publicEndpoints = [
             "/security/login",
+            "/security/change-password",
             "/metrics",
             "/console",
             "/test",
@@ -1064,6 +1095,31 @@ Hello from Pilgrimage Web Console!</textarea
         });
       }
 
+      async function createUser() {
+        const username = document.getElementById("new-username").value.trim();
+        const password = document.getElementById("new-password").value.trim();
+        const role = document.getElementById("new-role").value;
+
+        if (!username || !password) {
+          updateResult("create-user-result", {
+            ok: false,
+            status: "Validation",
+            body: "Username and password are required",
+          });
+          return;
+        }
+
+        const result = await makeRequest("/security/create-user", "POST", {
+          username,
+          password,
+          role,
+        });
+        updateResult("create-user-result", {
+          ...result,
+          body: formatJSON(result.body),
+        });
+      }
+
       // Monitoring Functions
       async function getMetrics() {
         const result = await makeRequest("/metrics");
@@ -1243,6 +1299,87 @@ Hello from Pilgrimage Web Console!</textarea
       let currentUser = null;
       let userRole = null;
 
+      // ===== Admin first-login password change modal =====
+      function ensurePasswordModal() {
+        if (document.getElementById("pwd-modal")) return;
+        const modalHtml = `
+        <div id="pwd-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.4); align-items:center; justify-content:center; z-index:1000;">
+          <div style="background:#1f2937; color:#e5e7eb; width:90%; max-width:420px; border-radius:8px; padding:20px; box-shadow:0 10px 25px rgba(0,0,0,0.5);">
+            <h3 style="margin:0 0 10px; font-size:18px;">Admin パスワード変更</h3>
+            <p style="margin:0 0 16px; font-size:13px; color:#93c5fd;">初回ログインにはパスワード変更が必要です（localhostからのアクセス）。</p>
+            <div style="display:flex; flex-direction:column; gap:10px;">
+              <input id="pwd-new" type="password" placeholder="新しいパスワード (6文字以上)" style="padding:10px; border-radius:6px; border:1px solid #374151; background:#111827; color:#e5e7eb;">
+              <input id="pwd-confirm" type="password" placeholder="新しいパスワード(確認)" style="padding:10px; border-radius:6px; border:1px solid #374151; background:#111827; color:#e5e7eb;">
+              <div id="pwd-error" style="display:none; color:#f87171; font-size:12px;"></div>
+            </div>
+            <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:16px;">
+              <button id="pwd-cancel" style="padding:8px 12px; background:#374151; color:#e5e7eb; border:none; border-radius:6px; cursor:pointer;">キャンセル</button>
+              <button id="pwd-submit" style="padding:8px 12px; background:#3b82f6; color:white; border:none; border-radius:6px; cursor:pointer;">変更</button>
+            </div>
+          </div>
+        </div>`;
+        document.body.insertAdjacentHTML("beforeend", modalHtml);
+        document
+          .getElementById("pwd-cancel")
+          .addEventListener("click", () => togglePwdModal(false));
+      }
+
+      function togglePwdModal(show, clear = true) {
+        const m = document.getElementById("pwd-modal");
+        if (!m) return;
+        m.style.display = show ? "flex" : "none";
+        if (clear) {
+          const e = document.getElementById("pwd-error");
+          e.style.display = "none";
+          e.textContent = "";
+          const n = document.getElementById("pwd-new");
+          if (n) n.value = "";
+          const c = document.getElementById("pwd-confirm");
+          if (c) c.value = "";
+        }
+        if (show) {
+          const n = document.getElementById("pwd-new");
+          if (n) n.focus();
+        }
+      }
+
+      function getNewPasswordFromModal() {
+        ensurePasswordModal();
+        togglePwdModal(true);
+        return new Promise((resolve) => {
+          const btn = document.getElementById("pwd-submit");
+          const handler = () => {
+            const err = document.getElementById("pwd-error");
+            const n = document.getElementById("pwd-new").value.trim();
+            const c = document.getElementById("pwd-confirm").value.trim();
+            if (n.length < 6) {
+              err.textContent = "新しいパスワードは6文字以上にしてください";
+              err.style.display = "block";
+              return;
+            }
+            if (n !== c) {
+              err.textContent = "パスワードが一致しません";
+              err.style.display = "block";
+              return;
+            }
+            btn.removeEventListener("click", handler);
+            togglePwdModal(false);
+            resolve(n);
+          };
+          btn.addEventListener("click", handler);
+          const onKey = (e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              handler();
+            }
+          };
+          document.getElementById("pwd-new").addEventListener("keydown", onKey);
+          document
+            .getElementById("pwd-confirm")
+            .addEventListener("keydown", onKey);
+        });
+      }
+
       // Check session on page load
       document.addEventListener("DOMContentLoaded", function () {
         checkSession();
@@ -1288,7 +1425,7 @@ Hello from Pilgrimage Web Console!</textarea
         }
 
         try {
-          const result = await makeRequest("/security/login", "POST", {
+          let result = await makeRequest("/security/login", "POST", {
             username: username,
             password: password,
           });
@@ -1319,6 +1456,65 @@ Hello from Pilgrimage Web Console!</textarea
             document.getElementById("login-username").value = "";
             document.getElementById("login-password").value = "";
             errorDiv.style.display = "none";
+          } else if (result.status === 403) {
+            // Possibly password change required
+            try {
+              const data = JSON.parse(result.body || "{}");
+              if (data.change_required) {
+                const newPwd = await getNewPasswordFromModal();
+
+                const chg = await makeRequest(
+                  "/security/change-password",
+                  "POST",
+                  {
+                    username: username,
+                    current_password: password,
+                    new_password: newPwd,
+                  }
+                );
+
+                if (chg.ok) {
+                  // Retry login with new password
+                  result = await makeRequest("/security/login", "POST", {
+                    username: username,
+                    password: newPwd,
+                  });
+
+                  if (result.ok && result.status === 200) {
+                    const response = JSON.parse(result.body);
+                    authToken = response.token;
+                    currentUser = username;
+                    userRole = response.role;
+
+                    localStorage.setItem("authToken", authToken);
+                    localStorage.setItem("currentUser", currentUser);
+                    localStorage.setItem("userRole", userRole);
+
+                    showMainConsole();
+                    // Update system status
+                    updateSystemStatus();
+                    document.getElementById("login-username").value = "";
+                    document.getElementById("login-password").value = "";
+                    errorDiv.style.display = "none";
+                    return;
+                  } else {
+                    showLoginError(
+                      "パスワード変更後のログインに失敗しました: " +
+                        (result.body || "")
+                    );
+                    return;
+                  }
+                } else {
+                  showLoginError(
+                    "パスワード変更に失敗しました: " + (chg.body || "")
+                  );
+                  return;
+                }
+              }
+            } catch (_) {
+              // fallthrough to generic error
+            }
+            showLoginError(result.body || "Login failed");
           } else {
             showLoginError(result.body || "Login failed");
           }

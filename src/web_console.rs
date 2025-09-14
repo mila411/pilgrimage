@@ -1,13 +1,16 @@
-use actix_web::{App, HttpResponse, HttpServer, Responder, Result as ActixResult, web};
+use actix_web::{App, HttpRequest, HttpResponse, HttpServer, Responder, Result as ActixResult, web};
 use log::debug;
 use prometheus::{Counter, Encoder, Histogram, TextEncoder, register_counter, register_histogram};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
-    sync::{Arc, Mutex},
+  net::{IpAddr},
+  sync::{Arc, Mutex},
+  time::{Duration, Instant},
 };
 
 use crate::auth::{DistributedAuthenticator, web_middleware::JwtAuth};
+use crate::auth::web_middleware::get_authenticated_user_claims;
 use crate::broker::Broker;
 use crate::broker::node::Node;
 use crate::message::metadata::MessageMetadata;
@@ -142,8 +145,21 @@ pub struct AppState {
     brokers: Arc<Mutex<HashMap<String, BrokerWrapper>>>,
     /// Security manager for handling authentication, authorization, and audit logging
     security_manager: Arc<SecurityManager>,
-    /// JWT authenticator for token validation and generation
-    jwt_authenticator: Arc<DistributedAuthenticator>,
+  /// JWT authenticator for token validation and generation
+  jwt_authenticator: Arc<Mutex<DistributedAuthenticator>>,
+  /// Whether to trust X-Forwarded-For header from trusted proxies
+  trust_xff: bool,
+  /// Trusted proxy IPs (exact IP match)
+  trusted_proxies: Vec<IpAddr>,
+  /// Login attempts for rate limiting and lockout
+  login_attempts: Arc<Mutex<HashMap<String, AttemptInfo>>>,
+}
+
+/// Simple login attempt tracker for rate limiting/lockout
+struct AttemptInfo {
+  count: u32,
+  first: Instant,
+  locked_until: Option<Instant>,
 }
 
 /// Deserializable structure for starting a new broker.
@@ -247,6 +263,22 @@ struct SecurityStatusResponse {
     active_connections: usize,
     audit_events_today: usize,
     roles_configured: usize,
+}
+
+/// Request structure for changing a user's password
+#[derive(Deserialize)]
+struct ChangePasswordRequest {
+  username: String,
+  current_password: String,
+  new_password: String,
+}
+
+/// Request structure for creating a new user (admin-only)
+#[derive(Deserialize)]
+struct CreateUserRequest {
+  username: String,
+  password: String,
+  role: String,
 }
 
 /// Starts a new broker with the given information.
@@ -1163,6 +1195,65 @@ fn default_dashboard_html() -> String {
         }, 30000);
       });
 
+      function ensurePasswordModal() {
+        if (document.getElementById("pwd-modal")) return;
+        const modalHtml = `
+        <div id="pwd-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.4); align-items:center; justify-content:center; z-index:1000;">
+          <div style="background:#1f2937; color:#e5e7eb; width:90%; max-width:420px; border-radius:8px; padding:20px; box-shadow:0 10px 25px rgba(0,0,0,0.5);">
+            <h3 style="margin:0 0 10px; font-size:18px;">Admin パスワード変更</h3>
+            <p style="margin:0 0 16px; font-size:13px; color:#93c5fd;">初回ログインにはパスワード変更が必要です（localhostからのアクセス）。</p>
+            <div style="display:flex; flex-direction:column; gap:10px;">
+              <input id="pwd-new" type="password" placeholder="新しいパスワード (6文字以上)" style="padding:10px; border-radius:6px; border:1px solid #374151; background:#111827; color:#e5e7eb;">
+              <input id="pwd-confirm" type="password" placeholder="新しいパスワード(確認)" style="padding:10px; border-radius:6px; border:1px solid #374151; background:#111827; color:#e5e7eb;">
+              <div id="pwd-error" style="display:none; color:#f87171; font-size:12px;"></div>
+            </div>
+            <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:16px;">
+              <button id="pwd-cancel" style="padding:8px 12px; background:#374151; color:#e5e7eb; border:none; border-radius:6px; cursor:pointer;">キャンセル</button>
+              <button id="pwd-submit" style="padding:8px 12px; background:#3b82f6; color:white; border:none; border-radius:6px; cursor:pointer;">変更</button>
+            </div>
+          </div>
+        </div>`;
+        document.body.insertAdjacentHTML('beforeend', modalHtml);
+        document.getElementById('pwd-cancel').addEventListener('click', () => togglePwdModal(false));
+      }
+
+      function togglePwdModal(show, clear=true) {
+        const m = document.getElementById('pwd-modal');
+        if (!m) return;
+        m.style.display = show ? 'flex' : 'none';
+        if (clear) {
+          const e = document.getElementById('pwd-error');
+          e.style.display = 'none'; e.textContent = '';
+          const n = document.getElementById('pwd-new'); if (n) n.value='';
+          const c = document.getElementById('pwd-confirm'); if (c) c.value='';
+        }
+        if (show) {
+          const n = document.getElementById('pwd-new'); if (n) n.focus();
+        }
+      }
+
+      function getNewPasswordFromModal() {
+        ensurePasswordModal();
+        togglePwdModal(true);
+        return new Promise((resolve) => {
+          const btn = document.getElementById('pwd-submit');
+          const handler = () => {
+            const err = document.getElementById('pwd-error');
+            const n = document.getElementById('pwd-new').value.trim();
+            const c = document.getElementById('pwd-confirm').value.trim();
+            if (n.length < 6) { err.textContent = '新しいパスワードは6文字以上にしてください'; err.style.display = 'block'; return; }
+            if (n !== c) { err.textContent = 'パスワードが一致しません'; err.style.display = 'block'; return; }
+            btn.removeEventListener('click', handler);
+            togglePwdModal(false);
+            resolve(n);
+          };
+          btn.addEventListener('click', handler);
+          const onKey = (e) => { if (e.key === 'Enter') { e.preventDefault(); handler(); } };
+          document.getElementById('pwd-new').addEventListener('keydown', onKey);
+          document.getElementById('pwd-confirm').addEventListener('keydown', onKey);
+        });
+      }
+
       function checkSession() {
         authToken = localStorage.getItem("authToken");
         currentUser = localStorage.getItem("currentUser");
@@ -1188,7 +1279,7 @@ fn default_dashboard_html() -> String {
         document.getElementById("role-display").textContent = userRole;
       }
 
-      async function handleLogin(event) {
+  async function handleLogin(event) {
         event.preventDefault();
 
         const username = document.getElementById("login-username").value.trim();
@@ -1201,7 +1292,7 @@ fn default_dashboard_html() -> String {
         }
 
         try {
-          const result = await makeRequest("/security/login", "POST", {
+          let result = await makeRequest("/security/login", "POST", {
             username: username,
             password: password,
           });
@@ -1226,7 +1317,54 @@ fn default_dashboard_html() -> String {
             document.getElementById("login-username").value = "";
             document.getElementById("login-password").value = "";
             errorDiv.style.display = "none";
-          } else {
+          } else if (result.status === 403) {
+            // Possibly password change required
+            try {
+              const data = JSON.parse(result.body || '{}');
+              if (data.change_required) {
+                const newPwd = await getNewPasswordFromModal();
+
+                const chg = await makeRequest("/security/change-password", "POST", {
+                  username: username,
+                  current_password: password,
+                  new_password: newPwd
+                });
+
+                if (chg.ok) {
+                  // Retry login with new password
+                  result = await makeRequest("/security/login", "POST", {
+                    username: username,
+                    password: newPwd,
+                  });
+
+                  if (result.ok && result.status === 200) {
+                    const response = JSON.parse(result.body);
+                    authToken = response.token;
+                    currentUser = username;
+                    userRole = response.role;
+
+                    localStorage.setItem("authToken", authToken);
+                    localStorage.setItem("currentUser", currentUser);
+                    localStorage.setItem("userRole", userRole);
+
+                    showMainDashboard();
+                    refreshDashboard();
+                    document.getElementById("login-username").value = "";
+                    document.getElementById("login-password").value = "";
+                    errorDiv.style.display = "none";
+                    return;
+                  } else {
+                    showLoginError("パスワード変更後のログインに失敗しました: " + (result.body || ""));
+                    return;
+                  }
+                } else {
+                  showLoginError("パスワード変更に失敗しました: " + (chg.body || ""));
+                  return;
+                }
+              }
+            } catch (_) {
+              // fallthrough to generic error
+            }
             showLoginError(result.body || "Login failed");
           }
         } catch (error) {
@@ -1699,9 +1837,22 @@ async fn topic_details_api(data: web::Data<AppState>) -> impl Responder {
 
 /// Security login endpoint
 async fn security_login(
-    info: web::Json<SecurityLoginRequest>,
-    data: web::Data<AppState>,
+  req: HttpRequest,
+  info: web::Json<SecurityLoginRequest>,
+  data: web::Data<AppState>,
 ) -> ActixResult<impl Responder> {
+  // Determine client IP (respect XFF if configured/trusted)
+  let client_ip = resolve_client_ip(&req, &data);
+
+  // Rate limit / lockout check
+  if let Some(ip) = client_ip {
+    if is_locked_out(&data, &info.username, ip) {
+      return Ok(HttpResponse::TooManyRequests().json(serde_json::json!({
+        "error": "too_many_attempts",
+        "message": "Too many failed attempts. Please try again later."
+      })));
+    }
+  }
     // Validate input parameters
     if info.username.trim().is_empty() {
         let _ = data
@@ -1729,30 +1880,73 @@ async fn security_login(
         return Ok(HttpResponse::BadRequest().json("Password cannot be empty"));
     }
 
-    // Basic credential validation (same as before for simplicity)
-    let (is_valid, role) = match (info.username.as_str(), info.password.as_str()) {
-        ("admin", "password") => (true, "admin"),
-        ("user", "password") => (true, "user"),
-        ("guest", "guest") => (true, "guest"),
-        _ => (false, ""),
+  // Enforce admin password change on first localhost login
+  let is_localhost = client_ip.map(|ip| ip.is_loopback()).unwrap_or(false);
+
+  // Authenticate once to validate credentials (avoids showing modal on wrong password)
+  let auth_result_initial = {
+    // Do not hold the lock across awaits; this block ends before any await
+    data
+      .jwt_authenticator
+      .lock()
+      .unwrap()
+      .authenticate_client(&info.username, &info.password)
+  };
+
+  if info.username == "admin" {
+    let requires_change = {
+      if let Ok(auth) = data.jwt_authenticator.lock() {
+        auth.is_admin_password_change_required()
+      } else { false }
     };
-
-    if !is_valid {
+    if is_localhost && requires_change {
+      if auth_result_initial.success {
+        // Credentials are correct but admin must change password first
+        // Reset attempts on credential success (even though we require change)
+        if let Some(ip) = client_ip {
+          reset_attempts(&data, &info.username, ip);
+        }
         let _ = data
-            .security_manager
-            .log_simple_security_event(
-                "login_failed",
-                &info.username,
-                &format!("Invalid credentials for user {}", info.username),
-                false,
-            )
-            .await;
-        return Ok(HttpResponse::Unauthorized().json("Invalid username or password"));
+          .security_manager
+          .log_simple_security_event(
+            "password_change_required",
+            &info.username,
+            "Admin must change password on first localhost login",
+            false,
+          )
+          .await;
+        return Ok(HttpResponse::Forbidden().json(serde_json::json!({
+          "change_required": true,
+          "message": "Admin must change password before first login from localhost"
+        })));
+      }
+      // If credentials are wrong, fall through to standard unauthorized handling below
     }
+  }
 
-    // Generate JWT token using the distributed authenticator
-    match data.jwt_authenticator.authenticate_client(&info.username, &info.password) {
-        auth_result if auth_result.success => {
+  // Generate JWT token using the distributed authenticator
+  match auth_result_initial {
+    auth_result if auth_result.success => {
+      // Reset attempts on success
+      if let Some(ip) = client_ip {
+        reset_attempts(&data, &info.username, ip);
+      }
+      // Determine role from permissions
+      let role = if auth_result
+        .permissions
+        .iter()
+        .any(|p| p == "admin")
+      {
+        "admin"
+      } else if auth_result
+        .permissions
+        .iter()
+        .any(|p| p == "write")
+      {
+        "user"
+      } else {
+        "guest"
+      };
             // Log successful security event
             let _ = data
                 .security_manager
@@ -1764,12 +1958,16 @@ async fn security_login(
                 )
                 .await;
 
-            Ok(HttpResponse::Ok().json(SecurityLoginResponse {
+      Ok(HttpResponse::Ok().json(SecurityLoginResponse {
                 token: auth_result.token.unwrap_or_default(),
-                role: role.to_string(),
+        role: role.to_string(),
             }))
         }
         auth_result => {
+      // Record failed attempt
+      if let Some(ip) = client_ip {
+        record_failed_attempt(&data, &info.username, ip);
+      }
             let _ = data
                 .security_manager
                 .log_simple_security_event(
@@ -1782,6 +1980,211 @@ async fn security_login(
             Ok(HttpResponse::Unauthorized().json("Invalid username or password"))
         }
     }
+}
+
+/// Endpoint to change password (used for enforcing admin first-login policy)
+async fn security_change_password(
+  req: HttpRequest,
+  info: web::Json<ChangePasswordRequest>,
+  data: web::Data<AppState>,
+) -> ActixResult<impl Responder> {
+  // Only allow from localhost for admin enforcement (proxy-aware)
+  let client_ip = resolve_client_ip(&req, &data);
+  let is_localhost = client_ip.map(|ip| ip.is_loopback()).unwrap_or(false);
+
+  if !is_localhost {
+    return Ok(HttpResponse::Forbidden().json("Password change allowed only from localhost"));
+  }
+
+  if info.username.trim().is_empty() || info.new_password.trim().is_empty() {
+    return Ok(HttpResponse::BadRequest().json("Username and new password are required"));
+  }
+
+  // Currently only enforce/admin supported in this flow
+  if info.username != "admin" {
+    return Ok(HttpResponse::BadRequest().json("Only admin password change is supported here"));
+  }
+
+  let mut auth = match data.jwt_authenticator.lock() {
+    Ok(guard) => guard,
+    Err(_) => return Ok(HttpResponse::InternalServerError().json("Auth state lock poisoned")),
+  };
+
+  if !auth.is_admin_password_change_required() {
+    return Ok(HttpResponse::BadRequest().json("Password change not required"));
+  }
+
+  match auth.change_user_password(&info.username, &info.current_password, &info.new_password) {
+    Ok(()) => {
+      // Disable the requirement after successful change
+      auth.set_admin_password_change_required(false);
+
+      let _ = data
+        .security_manager
+        .log_simple_security_event(
+          "password_changed",
+          &info.username,
+          "Admin password changed on localhost",
+          true,
+        )
+        .await;
+
+      Ok(HttpResponse::Ok().json(serde_json::json!({
+        "status": "ok",
+        "message": "Password changed successfully"
+      })))
+    }
+    Err(e) => Ok(HttpResponse::Unauthorized().json(serde_json::json!({
+      "status": "error",
+      "message": e
+    }))),
+  }
+}
+
+/// Admin-only endpoint to create a new user
+async fn security_create_user(
+  req: HttpRequest,
+  info: web::Json<CreateUserRequest>,
+  data: web::Data<AppState>,
+) -> ActixResult<impl Responder> {
+  // Require authenticated admin
+  let Some(claims) = get_authenticated_user_claims(&req) else {
+    return Ok(HttpResponse::Unauthorized().json("Authentication required"));
+  };
+  let is_admin = claims.roles.iter().any(|r| r == "admin");
+  if !is_admin {
+    return Ok(HttpResponse::Forbidden().json("Admin role required"));
+  }
+
+  let username = info.username.trim();
+  let password = info.password.trim();
+  let role = info.role.trim().to_lowercase();
+
+  if username.is_empty() || password.is_empty() {
+    return Ok(HttpResponse::BadRequest().json("Username and password are required"));
+  }
+  if password.len() < 4 {
+    return Ok(HttpResponse::BadRequest().json("Password must be at least 4 characters"));
+  }
+
+  // Map role -> permissions
+  let permissions: Vec<String> = match role.as_str() {
+    "admin" => vec!["read".into(), "write".into(), "admin".into()],
+    "user" => vec!["read".into(), "write".into()],
+    "viewer" | "view" | "read" => vec!["read".into()],
+    other => {
+      return Ok(HttpResponse::BadRequest().json(format!("Unknown role: {}", other)));
+    }
+  };
+
+  // Add user
+  let mut auth = match data.jwt_authenticator.lock() {
+    Ok(guard) => guard,
+    Err(_) => return Ok(HttpResponse::InternalServerError().json("Auth state lock poisoned")),
+  };
+
+  // Optional: basic existence prevention via permissions map
+  if auth.user_exists(username) {
+    return Ok(HttpResponse::Conflict().json("User already exists"));
+  }
+
+  auth.add_user(username, password);
+  auth.add_user_permissions(username.to_string(), permissions);
+
+  let _ = data.security_manager
+    .log_simple_security_event(
+      "user_created",
+      &claims.sub,
+      &format!("Admin '{}' created user '{}' with role '{}'", claims.sub, username, role),
+      true,
+    ).await;
+
+  Ok(HttpResponse::Ok().json(serde_json::json!({
+    "status": "ok",
+    "username": username,
+    "role": role,
+  })))
+}
+
+/// Resolve client IP, honoring X-Forwarded-For only if the direct peer is a trusted proxy
+fn resolve_client_ip(req: &HttpRequest, data: &AppState) -> Option<IpAddr> {
+  let peer_ip = req.peer_addr().map(|a| a.ip());
+  if !data.trust_xff {
+    return peer_ip;
+  }
+
+  let Some(peer) = peer_ip else { return None; };
+  let is_trusted = data.trusted_proxies.iter().any(|p| *p == peer);
+  if !is_trusted {
+    return Some(peer);
+  }
+
+  // Peer is a trusted proxy; use X-Forwarded-For first IP
+  if let Some(hval) = req.headers().get("X-Forwarded-For").and_then(|h| h.to_str().ok()) {
+    if let Some(first) = hval.split(',').next() {
+      let ip_str = first.trim();
+      if let Ok(ip) = ip_str.parse::<IpAddr>() {
+        return Some(ip);
+      }
+    }
+  }
+  Some(peer)
+}
+
+fn throttle_key(username: &str, ip: IpAddr) -> String {
+  format!("{}|{}", username, ip)
+}
+
+fn is_locked_out(data: &AppState, username: &str, ip: IpAddr) -> bool {
+  const LOCKOUT_WINDOW: Duration = Duration::from_secs(15 * 60);
+  let key = throttle_key(username, ip);
+  let mut map = data.login_attempts.lock().unwrap();
+  if let Some(info) = map.get_mut(&key) {
+    if let Some(until) = info.locked_until {
+      if Instant::now() < until { return true; }
+      // lock expired, reset
+      info.locked_until = None;
+      info.count = 0;
+      info.first = Instant::now();
+      return false;
+    }
+    // Slide window
+    if Instant::now().duration_since(info.first) > LOCKOUT_WINDOW {
+      info.count = 0;
+      info.first = Instant::now();
+    }
+  }
+  false
+}
+
+fn record_failed_attempt(data: &AppState, username: &str, ip: IpAddr) {
+  const LOCKOUT_WINDOW: Duration = Duration::from_secs(15 * 60);
+  const MAX_ATTEMPTS: u32 = 5;
+  const LOCKOUT_DURATION: Duration = Duration::from_secs(5 * 60);
+
+  let key = throttle_key(username, ip);
+  let mut map = data.login_attempts.lock().unwrap();
+  let entry = map.entry(key).or_insert(AttemptInfo { count: 0, first: Instant::now(), locked_until: None });
+
+  // Slide window
+  if Instant::now().duration_since(entry.first) > LOCKOUT_WINDOW {
+    entry.count = 0;
+    entry.first = Instant::now();
+    entry.locked_until = None;
+  }
+
+  entry.count += 1;
+  if entry.count >= MAX_ATTEMPTS {
+    entry.locked_until = Some(Instant::now() + LOCKOUT_DURATION);
+    entry.count = 0; // reset count during lock
+    entry.first = Instant::now();
+  }
+}
+
+fn reset_attempts(data: &AppState, username: &str, ip: IpAddr) {
+  let key = throttle_key(username, ip);
+  let mut map = data.login_attempts.lock().unwrap();
+  map.remove(&key);
 }
 
 /// Security role assignment endpoint
@@ -1945,13 +2348,33 @@ pub async fn run_server() -> std::io::Result<()> {
     jwt_authenticator.add_user_permissions("user".to_string(), vec!["read".to_string(), "write".to_string()]);
     jwt_authenticator.add_user_permissions("guest".to_string(), vec!["read".to_string()]);
 
-    let jwt_authenticator = Arc::new(jwt_authenticator);
+  // Admin password-change requirement from env (default true for safety)
+  let admin_change_required = std::env::var("ADMIN_PASSWORD_CHANGE_REQUIRED")
+    .ok()
+    .and_then(|v| v.parse::<bool>().ok())
+    .unwrap_or(true);
+  jwt_authenticator.set_admin_password_change_required(admin_change_required);
+
+  let jwt_authenticator = Arc::new(Mutex::new(jwt_authenticator));
     println!("✅ JWT authentication configured");
 
-    let state = AppState {
+  // Proxy/XFF config from env
+  let trust_xff = std::env::var("TRUST_XFF")
+    .ok()
+    .and_then(|v| v.parse::<bool>().ok())
+    .unwrap_or(false);
+  let trusted_proxies = std::env::var("TRUSTED_PROXIES")
+    .ok()
+    .map(|s| s.split(',').filter_map(|x| x.trim().parse().ok()).collect::<Vec<IpAddr>>())
+    .unwrap_or_else(|| vec![]);
+
+  let state = AppState {
         brokers: Arc::new(Mutex::new(HashMap::new())),
         security_manager,
-        jwt_authenticator,
+    jwt_authenticator,
+    trust_xff,
+    trusted_proxies,
+    login_attempts: Arc::new(Mutex::new(HashMap::new())),
     };
     println!("✅ Application state configured");
 
@@ -1971,8 +2394,9 @@ pub async fn run_server() -> std::io::Result<()> {
             .route("/health", web::get().to(health_check))
             .route("/health/{broker_id}", web::get().to(broker_health_check))
             .route("/api/cluster-health", web::get().to(cluster_health_api))
-            // Security login endpoint (no auth required for login)
+            // Security endpoints (no auth required for login and password change)
             .route("/security/login", web::post().to(security_login))
+            .route("/security/change-password", web::post().to(security_change_password))
             // Protected endpoints (JWT authentication required)
             .service(
                 web::scope("")
@@ -1984,6 +2408,7 @@ pub async fn run_server() -> std::io::Result<()> {
                     .route("/status", web::post().to(broker_status))
                     .route("/api/dashboard", web::get().to(dashboard_api))
                     .route("/api/topic-details", web::get().to(topic_details_api))
+        .route("/security/create-user", web::post().to(security_create_user))
                     .route("/security/assign-role", web::post().to(security_assign_role))
                     .route("/security/check-permission", web::post().to(security_check_permission))
                     .route("/security/status", web::get().to(security_status))
@@ -2031,10 +2456,13 @@ mod tests {
         jwt_authenticator.add_user("user", "password");
         jwt_authenticator.add_user("guest", "guest");
 
-        AppState {
+    AppState {
             brokers: Arc::new(Mutex::new(HashMap::new())),
             security_manager,
-            jwt_authenticator: Arc::new(jwt_authenticator),
+            jwt_authenticator: Arc::new(Mutex::new(jwt_authenticator)),
+      trust_xff: false,
+      trusted_proxies: vec![],
+      login_attempts: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -2635,6 +3063,79 @@ mod tests {
         let resp = test::call_service(&mut app, req).await;
         assert_eq!(resp.status(), actix_web::http::StatusCode::BAD_REQUEST);
     }
+
+  #[actix_rt::test]
+  async fn test_login_admin_requires_change_then_success() {
+    let state = create_test_app_state().await;
+
+    {
+      let mut auth = state.jwt_authenticator.lock().unwrap();
+      auth.set_admin_password_change_required(true);
+    }
+
+    let mut app = test::init_service(
+      App::new()
+        .app_data(web::Data::new(state.clone()))
+        .route("/security/login", web::post().to(super::security_login))
+        .route("/security/change-password", web::post().to(super::security_change_password))
+    ).await;
+
+    // First login should require password change (403)
+    let req = test::TestRequest::post()
+      .uri("/security/login")
+      .set_json(json!({"username":"admin","password":"password"}))
+      .to_request();
+    let resp = test::call_service(&mut app, req).await;
+    assert_eq!(resp.status(), actix_web::http::StatusCode::FORBIDDEN);
+
+    // Change password from localhost
+    let req = test::TestRequest::post()
+      .uri("/security/change-password")
+      .set_json(json!({"username":"admin","current_password":"password","new_password":"newpass123"}))
+      .to_request();
+    let resp = test::call_service(&mut app, req).await;
+    assert!(resp.status().is_success());
+
+    // Login with new password succeeds
+    let req = test::TestRequest::post()
+      .uri("/security/login")
+      .set_json(json!({"username":"admin","password":"newpass123"}))
+      .to_request();
+    let resp = test::call_service(&mut app, req).await;
+    assert!(resp.status().is_success());
+  }
+
+  #[actix_rt::test]
+  async fn test_xff_trusted_proxy_uses_forwarded_ip_and_locks_out() {
+    use actix_web::http::header::{HeaderName, HeaderValue};
+
+    let state = create_test_app_state().await;
+
+    let mut app = test::init_service(
+      App::new()
+        .app_data(web::Data::new(state.clone()))
+        .route("/security/login", web::post().to(super::security_login))
+    ).await;
+
+    // Simulate repeated failures from forwarded client IP via trusted proxy
+    for _ in 0..6 {
+      let req = test::TestRequest::post()
+        .uri("/security/login")
+        .insert_header((HeaderName::from_static("x-forwarded-for"), HeaderValue::from_str("203.0.113.1").unwrap()))
+        .set_json(json!({"username":"user","password":"wrong"}))
+        .to_request();
+      let _ = test::call_service(&mut app, req).await;
+    }
+
+    // Expect lockout
+    let req = test::TestRequest::post()
+      .uri("/security/login")
+      .insert_header((HeaderName::from_static("x-forwarded-for"), HeaderValue::from_str("203.0.113.1").unwrap()))
+      .set_json(json!({"username":"user","password":"wrong"}))
+      .to_request();
+    let resp = test::call_service(&mut app, req).await;
+    assert_eq!(resp.status(), actix_web::http::StatusCode::TOO_MANY_REQUESTS);
+  }
 
     /// Test for authentication with empty password
     #[actix_rt::test]
