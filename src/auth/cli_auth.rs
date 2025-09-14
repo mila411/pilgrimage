@@ -350,6 +350,26 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
 
+    fn create_test_manager() -> (CliAuthManager, tempfile::TempDir) {
+        let temp_dir = tempdir().unwrap();
+        let session_file = temp_dir.path().join("session.json");
+
+        let jwt_secret = DistributedAuthenticator::generate_jwt_secret();
+        let mut authenticator = DistributedAuthenticator::new(
+            jwt_secret,
+            "pilgrimage-cli-test".to_string(),
+        );
+        authenticator.set_token_expiry(7200);
+
+        let manager = CliAuthManager {
+            authenticator,
+            session_file,
+            session_duration: 7200,
+        };
+
+        (manager, temp_dir)
+    }
+
     #[tokio::test]
     async fn test_cli_auth_manager_creation() {
         let manager = CliAuthManager::new();
@@ -358,7 +378,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_default_users_initialization() {
-        let mut manager = CliAuthManager::new().unwrap();
+        let (mut manager, _temp_dir) = create_test_manager();
         manager.init_default_users();
 
         // Test admin login
@@ -372,22 +392,23 @@ mod tests {
 
     #[tokio::test]
     async fn test_user_permissions() {
-        let mut manager = CliAuthManager::new().unwrap();
+        let (mut manager, _temp_dir) = create_test_manager();
         manager.init_default_users();
 
         // Login as user
         let _session = manager.login("user", "user123").unwrap();
 
-        // Test permissions
-        assert!(manager.has_permission("send").unwrap());
-        assert!(manager.has_permission("consume").unwrap());
-        assert!(!manager.has_permission("start").unwrap());
-        assert!(!manager.has_permission("security").unwrap());
+        // Test permissions - use command names that map to user's permissions
+        assert!(manager.has_permission("send").unwrap());      // maps to message_send
+        assert!(manager.has_permission("consume").unwrap());   // maps to message_consume
+        assert!(manager.has_permission("metrics").unwrap());   // maps to metrics_view
+        assert!(!manager.has_permission("start").unwrap());    // maps to broker_start (admin only)
+        assert!(!manager.has_permission("security").unwrap()); // maps to security_manage (admin only)
     }
 
     #[tokio::test]
     async fn test_session_management() {
-        let mut manager = CliAuthManager::new().unwrap();
+        let (mut manager, _temp_dir) = create_test_manager();
         manager.init_default_users();
 
         // Login
@@ -405,11 +426,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_authentication_flow() {
-        let mut manager = CliAuthManager::new().unwrap();
+        let (mut manager, _temp_dir) = create_test_manager();
         manager.init_default_users();
 
         // Test require_auth without login
-        let result = manager.require_auth("start");
+        let result = manager.require_auth("start");  // Use command name, not permission name
         assert!(result.is_err());
 
         // Login and test again
@@ -420,7 +441,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_custom_user_addition() {
-        let mut manager = CliAuthManager::new().unwrap();
+        let (mut manager, _temp_dir) = create_test_manager();
 
         // Add custom user
         manager.add_user(

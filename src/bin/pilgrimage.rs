@@ -2,11 +2,120 @@ use clap::{Arg, Command};
 use std::error::Error;
 use pilgrimage::auth::cli_auth::{CliAuthManager, CliAuthError};
 use log::{error, debug};
+use std::fmt;
+
 mod commands;
-mod error;
 
 use commands::*;
-use error::CliError;
+
+// CLI Error types and handling
+pub type CliResult<T> = Result<T, CliError>;
+
+#[derive(Debug)]
+#[allow(dead_code)]
+pub enum CliError {
+    BrokerError {
+        kind: BrokerErrorKind,
+        message: String,
+    },
+    InvalidCommand(String),
+    UnknownCommand(String),
+    NoCommand,
+    AuthenticationError(String),
+    ConfigurationError(String),
+    NetworkError(String),
+    IoError(String),
+    ParseError {
+        field: String,
+        message: String,
+    },
+    SchemaError {
+        kind: SchemaErrorKind,
+        message: String,
+    },
+}
+
+#[derive(Debug)]
+#[allow(dead_code)]
+pub enum BrokerErrorKind {
+    StartupFailure,
+    ShutdownFailure,
+    ConnectionFailure,
+    ConnectionFailed,
+    OperationFailed,
+    Timeout,
+    TopicNotFound,
+    PartitionError,
+    Unknown,
+}
+
+#[derive(Debug)]
+#[allow(dead_code)]
+pub enum SchemaErrorKind {
+    ValidationError,
+    ValidationFailed,
+    CompatibilityError,
+    IncompatibleChange,
+    RegistrationError,
+    RegistryError,
+    NotFound,
+    ParseError,
+}
+
+impl fmt::Display for CliError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            CliError::BrokerError { kind, message } => {
+                write!(f, "Broker error ({:?}): {}", kind, message)
+            }
+            CliError::InvalidCommand(cmd) => {
+                write!(f, "Invalid command '{}'. Use --help for usage information", cmd)
+            }
+            CliError::UnknownCommand(cmd) => {
+                write!(f, "Unknown command '{}'. Use --help to see available commands", cmd)
+            }
+            CliError::NoCommand => {
+                write!(f, "No command provided. Use --help to see available commands")
+            }
+            CliError::AuthenticationError(msg) => {
+                write!(f, "Authentication error: {}", msg)
+            }
+            CliError::ConfigurationError(msg) => {
+                write!(f, "Configuration error: {}", msg)
+            }
+            CliError::NetworkError(msg) => {
+                write!(f, "Network error: {}", msg)
+            }
+            CliError::IoError(msg) => {
+                write!(f, "IO error: {}", msg)
+            }
+            CliError::ParseError { field, message } => {
+                if field.is_empty() {
+                    write!(f, "Parse error: {}", message)
+                } else {
+                    write!(f, "Parse error ({}): {}", field, message)
+                }
+            }
+            CliError::SchemaError { kind, message } => {
+                write!(f, "Schema error ({:?}): {}", kind, message)
+            }
+        }
+    }
+}
+
+impl std::error::Error for CliError {}
+
+impl From<std::io::Error> for CliError {
+    fn from(err: std::io::Error) -> Self {
+        CliError::IoError(err.to_string())
+    }
+}
+
+impl From<Box<dyn std::error::Error>> for CliError {
+    fn from(err: Box<dyn std::error::Error>) -> Self {
+        CliError::NetworkError(err.to_string())
+    }
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -888,27 +997,27 @@ async fn execute_authenticated_command(cmd_name: &str, sub_matches: &clap::ArgMa
             Some(("create", create_matches)) => handle_topic_create_command(create_matches)
                 .await
                 .map_err(|e| CliError::BrokerError {
-                    kind: crate::error::BrokerErrorKind::Unknown,
+                    kind: BrokerErrorKind::Unknown,
                     message: e.to_string(),
                 }),
             Some(("list", list_matches)) => {
                 handle_topic_list_command(list_matches)
                     .await
                     .map_err(|e| CliError::BrokerError {
-                        kind: crate::error::BrokerErrorKind::Unknown,
+                        kind: BrokerErrorKind::Unknown,
                         message: e.to_string(),
                     })
             }
             Some(("delete", delete_matches)) => handle_topic_delete_command(delete_matches)
                 .await
                 .map_err(|e| CliError::BrokerError {
-                    kind: crate::error::BrokerErrorKind::Unknown,
+                    kind: BrokerErrorKind::Unknown,
                     message: e.to_string(),
                 }),
             Some(("describe", describe_matches)) => handle_topic_describe_command(describe_matches)
                 .await
                 .map_err(|e| CliError::BrokerError {
-                    kind: crate::error::BrokerErrorKind::Unknown,
+                    kind: BrokerErrorKind::Unknown,
                     message: e.to_string(),
                 }),
             _ => Err(CliError::InvalidCommand("topic".to_string())),
@@ -937,20 +1046,20 @@ async fn execute_authenticated_command(cmd_name: &str, sub_matches: &clap::ArgMa
                 handle_group_list_command(list_matches)
                     .await
                     .map_err(|e| CliError::BrokerError {
-                        kind: crate::error::BrokerErrorKind::Unknown,
+                        kind: BrokerErrorKind::Unknown,
                         message: e.to_string(),
                     })
             }
             Some(("describe", describe_matches)) => handle_group_describe_command(describe_matches)
                 .await
                 .map_err(|e| CliError::BrokerError {
-                    kind: crate::error::BrokerErrorKind::Unknown,
+                    kind: BrokerErrorKind::Unknown,
                     message: e.to_string(),
                 }),
             Some(("reset", reset_matches)) => handle_group_reset_command(reset_matches)
                 .await
                 .map_err(|e| CliError::BrokerError {
-                    kind: crate::error::BrokerErrorKind::Unknown,
+                    kind: BrokerErrorKind::Unknown,
                     message: e.to_string(),
                 }),
             _ => Err(CliError::InvalidCommand("group".to_string())),
@@ -961,28 +1070,28 @@ async fn execute_authenticated_command(cmd_name: &str, sub_matches: &clap::ArgMa
                 Some(("auth", auth_matches)) => handle_auth_setup_command(auth_matches)
                     .await
                     .map_err(|e| CliError::BrokerError {
-                        kind: crate::error::BrokerErrorKind::Unknown,
+                        kind: BrokerErrorKind::Unknown,
                         message: e.to_string(),
                     }),
                 Some(("acl", acl_matches)) => {
                     handle_acl_command(acl_matches)
                         .await
                         .map_err(|e| CliError::BrokerError {
-                            kind: crate::error::BrokerErrorKind::Unknown,
+                            kind: BrokerErrorKind::Unknown,
                             message: e.to_string(),
                         })
                 }
                 Some(("token", token_matches)) => handle_token_command(token_matches)
                     .await
                     .map_err(|e| CliError::BrokerError {
-                        kind: crate::error::BrokerErrorKind::Unknown,
+                        kind: BrokerErrorKind::Unknown,
                         message: e.to_string(),
                     }),
                 Some(("cert", cert_matches)) => {
                     handle_cert_command(cert_matches)
                         .await
                         .map_err(|e| CliError::BrokerError {
-                            kind: crate::error::BrokerErrorKind::Unknown,
+                            kind: BrokerErrorKind::Unknown,
                             message: e.to_string(),
                         })
                 }
@@ -995,31 +1104,31 @@ async fn execute_authenticated_command(cmd_name: &str, sub_matches: &clap::ArgMa
                 Some(("show", show_matches)) => handle_metrics_show_command(show_matches)
                     .await
                     .map_err(|e| CliError::BrokerError {
-                        kind: crate::error::BrokerErrorKind::Unknown,
+                        kind: BrokerErrorKind::Unknown,
                         message: e.to_string(),
                     }),
                 Some(("export", export_matches)) => handle_metrics_export_command(export_matches)
                     .await
                     .map_err(|e| CliError::BrokerError {
-                        kind: crate::error::BrokerErrorKind::Unknown,
+                        kind: BrokerErrorKind::Unknown,
                         message: e.to_string(),
                     }),
                 Some(("health", health_matches)) => handle_health_command(health_matches)
                     .await
                     .map_err(|e| CliError::BrokerError {
-                        kind: crate::error::BrokerErrorKind::Unknown,
+                        kind: BrokerErrorKind::Unknown,
                         message: e.to_string(),
                     }),
                 Some(("performance", perf_matches)) => handle_performance_command(perf_matches)
                     .await
                     .map_err(|e| CliError::BrokerError {
-                        kind: crate::error::BrokerErrorKind::Unknown,
+                        kind: BrokerErrorKind::Unknown,
                         message: e.to_string(),
                     }),
                 Some(("alerts", alert_matches)) => handle_alerts_command(alert_matches)
                     .await
                     .map_err(|e| CliError::BrokerError {
-                        kind: crate::error::BrokerErrorKind::Unknown,
+                        kind: BrokerErrorKind::Unknown,
                         message: e.to_string(),
                     }),
                 _ => Err(CliError::InvalidCommand("metrics".to_string())),
@@ -1029,39 +1138,39 @@ async fn execute_authenticated_command(cmd_name: &str, sub_matches: &clap::ArgMa
             Some(("producer", producer_matches)) => handle_producer_test_command(producer_matches)
                 .await
                 .map_err(|e| CliError::BrokerError {
-                    kind: crate::error::BrokerErrorKind::Unknown,
+                    kind: BrokerErrorKind::Unknown,
                     message: e.to_string(),
                 }),
             Some(("consumer", consumer_matches)) => handle_consumer_test_command(consumer_matches)
                 .await
                 .map_err(|e| CliError::BrokerError {
-                    kind: crate::error::BrokerErrorKind::Unknown,
+                    kind: BrokerErrorKind::Unknown,
                     message: e.to_string(),
                 }),
             Some(("e2e", e2e_matches)) => {
                 handle_e2e_test_command(e2e_matches)
                     .await
                     .map_err(|e| CliError::BrokerError {
-                        kind: crate::error::BrokerErrorKind::Unknown,
+                        kind: BrokerErrorKind::Unknown,
                         message: e.to_string(),
                     })
             }
             Some(("stress", stress_matches)) => handle_stress_test_command(stress_matches)
                 .await
                 .map_err(|e| CliError::BrokerError {
-                    kind: crate::error::BrokerErrorKind::Unknown,
+                    kind: BrokerErrorKind::Unknown,
                     message: e.to_string(),
                 }),
             Some(("monitor", monitor_matches)) => handle_monitor_command(monitor_matches)
                 .await
                 .map_err(|e| CliError::BrokerError {
-                    kind: crate::error::BrokerErrorKind::Unknown,
+                    kind: BrokerErrorKind::Unknown,
                     message: e.to_string(),
                 }),
             Some(("results", results_matches)) => handle_results_command(results_matches)
                 .await
                 .map_err(|e| CliError::BrokerError {
-                    kind: crate::error::BrokerErrorKind::Unknown,
+                    kind: BrokerErrorKind::Unknown,
                     message: e.to_string(),
                 }),
             _ => Err(CliError::InvalidCommand("load-test".to_string())),

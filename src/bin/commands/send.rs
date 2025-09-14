@@ -1,4 +1,4 @@
-use crate::error::{BrokerErrorKind, CliError, CliResult, SchemaErrorKind};
+use crate::{BrokerErrorKind, CliError, CliResult, SchemaErrorKind};
 use clap::ArgMatches;
 use pilgrimage::broker::{Broker, MessageSchema};
 use pilgrimage::schema::registry::SchemaRegistry;

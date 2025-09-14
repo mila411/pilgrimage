@@ -1,4 +1,4 @@
-use crate::error::{CliError, CliResult, SchemaErrorKind};
+use crate::{CliError, CliResult, SchemaErrorKind};
 use clap::ArgMatches;
 use pilgrimage::schema::compatibility::Compatibility;
 use pilgrimage::schema::registry::{Schema, SchemaRegistry};

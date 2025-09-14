@@ -1,4 +1,4 @@
-use crate::error::{BrokerErrorKind, CliError, CliResult};
+use crate::{BrokerErrorKind, CliError, CliResult};
 use clap::ArgMatches;
 use pilgrimage::broker::Broker;
 use std::sync::Arc;

@@ -1,4 +1,4 @@
-use crate::error::{BrokerErrorKind, CliError};
+use crate::{BrokerErrorKind, CliError};
 use clap::ArgMatches;
 
 /// Handle the web command to start the web console server

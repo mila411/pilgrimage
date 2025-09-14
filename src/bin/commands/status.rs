@@ -1,4 +1,4 @@
-use crate::error::{CliError, CliResult};
+use crate::{CliError, CliResult};
 use clap::ArgMatches;
 use serde::Deserialize;
 use std::fs;

@@ -2104,15 +2104,7 @@ mod tests {
         let test_id = uuid::Uuid::new_v4().to_string();
         let storage_path = format!("./target/test_storage_{}", test_id);
 
-        let security_manager = Arc::new(
-            SecurityManager::new(SecurityConfig::default())
-                .await
-                .expect("Failed to initialize security manager"),
-        );
-        let state = AppState {
-            brokers: Arc::new(Mutex::new(HashMap::new())),
-            security_manager,
-        };
+        let state = create_test_app_state().await;
 
         let mut app = test::init_service(
             App::new()
@@ -2174,15 +2166,7 @@ mod tests {
         let test_id = uuid::Uuid::new_v4().to_string();
         let storage_path = format!("./target/test_storage_{}", test_id);
 
-        let security_manager = Arc::new(
-            SecurityManager::new(SecurityConfig::default())
-                .await
-                .expect("Failed to initialize security manager"),
-        );
-        let state = AppState {
-            brokers: Arc::new(Mutex::new(HashMap::new())),
-            security_manager,
-        };
+        let state = create_test_app_state().await;
 
         let mut app = test::init_service(
             App::new()
@@ -2251,15 +2235,7 @@ mod tests {
         let test_id = uuid::Uuid::new_v4().to_string();
         let storage_path = format!("./target/test_storage_{}", test_id);
 
-        let security_manager = Arc::new(
-            SecurityManager::new(SecurityConfig::default())
-                .await
-                .expect("Failed to initialize security manager"),
-        );
-        let state = AppState {
-            brokers: Arc::new(Mutex::new(HashMap::new())),
-            security_manager,
-        };
+  let state = create_test_app_state().await;
 
         let mut app = test::init_service(
             App::new()
@@ -2338,15 +2314,7 @@ mod tests {
         let test_id = uuid::Uuid::new_v4().to_string();
         let storage_path = format!("./target/test_storage_{}", test_id);
 
-        let security_manager = Arc::new(
-            SecurityManager::new(SecurityConfig::default())
-                .await
-                .expect("Failed to initialize security manager"),
-        );
-        let state = AppState {
-            brokers: Arc::new(Mutex::new(HashMap::new())),
-            security_manager,
-        };
+        let state = create_test_app_state().await;
 
         let mut app = test::init_service(
             App::new()
@@ -2409,15 +2377,7 @@ mod tests {
         let test_id = uuid::Uuid::new_v4().to_string();
         let storage_path = format!("./target/test_storage_{}", test_id);
 
-        let security_manager = Arc::new(
-            SecurityManager::new(SecurityConfig::default())
-                .await
-                .expect("Failed to initialize security manager"),
-        );
-        let state = AppState {
-            brokers: Arc::new(Mutex::new(HashMap::new())),
-            security_manager,
-        };
+        let state = create_test_app_state().await;
 
         let mut app = test::init_service(
             App::new()
@@ -2473,15 +2433,7 @@ mod tests {
     ///    indicating that the broker is not running.
     #[actix_rt::test]
     async fn test_stop_broker_not_running() {
-        let security_manager = Arc::new(
-            SecurityManager::new(SecurityConfig::default())
-                .await
-                .expect("Failed to initialize security manager"),
-        );
-        let state = AppState {
-            brokers: Arc::new(Mutex::new(HashMap::new())),
-            security_manager,
-        };
+        let state = create_test_app_state().await;
 
         let mut app = test::init_service(
             App::new()
@@ -2517,15 +2469,7 @@ mod tests {
     ///    indicating that the broker is not running.
     #[actix_rt::test]
     async fn test_send_message_no_broker() {
-        let security_manager = Arc::new(
-            SecurityManager::new(SecurityConfig::default())
-                .await
-                .expect("Failed to initialize security manager"),
-        );
-        let state = AppState {
-            brokers: Arc::new(Mutex::new(HashMap::new())),
-            security_manager,
-        };
+        let state = create_test_app_state().await;
 
         let mut app = test::init_service(
             App::new()
@@ -2562,15 +2506,7 @@ mod tests {
     ///    indicating that the broker is not running.
     #[actix_rt::test]
     async fn test_consume_messages_no_broker() {
-        let security_manager = Arc::new(
-            SecurityManager::new(SecurityConfig::default())
-                .await
-                .expect("Failed to initialize security manager"),
-        );
-        let state = AppState {
-            brokers: Arc::new(Mutex::new(HashMap::new())),
-            security_manager,
-        };
+        let state = create_test_app_state().await;
 
         let mut app = test::init_service(
             App::new()
@@ -2606,15 +2542,7 @@ mod tests {
     ///    indicating that the broker is not running.
     #[actix_rt::test]
     async fn test_broker_status_no_broker() {
-        let security_manager = Arc::new(
-            SecurityManager::new(SecurityConfig::default())
-                .await
-                .expect("Failed to initialize security manager"),
-        );
-        let state = AppState {
-            brokers: Arc::new(Mutex::new(HashMap::new())),
-            security_manager,
-        };
+        let state = create_test_app_state().await;
 
         let mut app = test::init_service(
             App::new()
@@ -2655,20 +2583,7 @@ mod tests {
         let test_id = uuid::Uuid::new_v4().to_string();
         let storage_path = format!("./target/test_storage_{}", test_id);
 
-        let security_manager = Arc::new(
-            SecurityManager::new(SecurityConfig::default())
-                .await
-                .expect("Failed to initialize security manager"),
-        );
-
-        let app_state = AppState {
-            brokers: Arc::new(Mutex::new(HashMap::new())),
-            security_manager,
-            jwt_authenticator: Arc::new(DistributedAuthenticator::new(
-                DistributedAuthenticator::generate_jwt_secret(),
-                "test".to_string(),
-            )),
-        };
+    let app_state = create_test_app_state().await;
 
         let srv = actix_test::start(move || {
             App::new()
@@ -2700,15 +2615,7 @@ mod tests {
     /// Test for authentication with empty username
     #[actix_rt::test]
     async fn test_auth_empty_username() {
-        let security_manager = Arc::new(
-            SecurityManager::new(SecurityConfig::default())
-                .await
-                .expect("Failed to initialize security manager"),
-        );
-        let state = AppState {
-            brokers: Arc::new(Mutex::new(HashMap::new())),
-            security_manager,
-        };
+    let state = create_test_app_state().await;
 
         let mut app = test::init_service(
             App::new()
@@ -2732,15 +2639,7 @@ mod tests {
     /// Test for authentication with empty password
     #[actix_rt::test]
     async fn test_auth_empty_password() {
-        let security_manager = Arc::new(
-            SecurityManager::new(SecurityConfig::default())
-                .await
-                .expect("Failed to initialize security manager"),
-        );
-        let state = AppState {
-            brokers: Arc::new(Mutex::new(HashMap::new())),
-            security_manager,
-        };
+        let state = create_test_app_state().await;
 
         let mut app = test::init_service(
             App::new()
@@ -2764,15 +2663,7 @@ mod tests {
     /// Test for authentication with invalid credentials
     #[actix_rt::test]
     async fn test_auth_invalid_credentials() {
-        let security_manager = Arc::new(
-            SecurityManager::new(SecurityConfig::default())
-                .await
-                .expect("Failed to initialize security manager"),
-        );
-        let state = AppState {
-            brokers: Arc::new(Mutex::new(HashMap::new())),
-            security_manager,
-        };
+        let state = create_test_app_state().await;
 
         let mut app = test::init_service(
             App::new()
@@ -2796,15 +2687,7 @@ mod tests {
     /// Test for authentication with valid credentials
     #[actix_rt::test]
     async fn test_auth_valid_credentials() {
-        let security_manager = Arc::new(
-            SecurityManager::new(SecurityConfig::default())
-                .await
-                .expect("Failed to initialize security manager"),
-        );
-        let state = AppState {
-            brokers: Arc::new(Mutex::new(HashMap::new())),
-            security_manager,
-        };
+        let state = create_test_app_state().await;
 
         let mut app = test::init_service(
             App::new()
