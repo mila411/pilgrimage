@@ -22,6 +22,12 @@
     <img alt="PRs Welcome" src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg">
 </p>
 
+⚠️⚠️⚠️
+This project is currently undergoing significant changes
+It aims to become a distributed message broker incorporating blockchain elements such as Raft and immutable logs
+Plans are also underway to enable native connections from existing Kafka clients
+⚠️⚠️⚠️
+
 <h1>🚀 Pilgrimage</h1>
 
 **Pilgrimage** is a high-performance, enterprise-grade distributed messaging system written in Rust, inspired by Apache Kafka. It provides reliable message persistence, advanced clustering capabilities, and comprehensive security features with **At-least-once** and **Exactly-once** delivery semantics.
